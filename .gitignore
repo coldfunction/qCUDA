@@ -1,0 +1,5 @@
+sftp-config.json
+*.o
+*.ko
+*.[oa]
+qcu-device/tags
