@@ -775,6 +775,16 @@ cudaError_t cudaGetLastError(void)
 
 	send_cmd_to_device( VIRTQC_cudaGetLastError, &arg);
 
+	//fix register mem
+    if(arg.cmd == 62) 
+    {   
+    	printf("***qCUDA warning***\n");
+        printf("\n");
+        printf("cudaErrorHostMemoryNotRegistered = 62\n");
+        printf("qCUDA let it pass due to the registered memory.");
+        arg.cmd = 0;
+    }   
+
 	time_end(t_GetLastError);
 	return (cudaError_t)arg.cmd;
 }

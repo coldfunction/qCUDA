@@ -327,7 +327,7 @@ static void qcu_cudaLaunch(VirtioQCArg *arg)
 //				conf[3], conf[4], conf[5], 
 //				conf[6], NULL, paraBuf, NULL)); // not suppoer stream yeat
 
-	cuError( cuLaunchKernel(cudaFunction[funcIdx],
+	cuError( cuLaunchKernel(cudaDevices[cudaDeviceCurrent].cudaFunction[funcIdx],
 				conf[0], conf[1], conf[2],
 				conf[3], conf[4], conf[5], 
 				conf[6], (conf[7]==(uint64_t)-1)?NULL:cudaStream[conf[7]], paraBuf, NULL)); // not suppoer stream yeat
@@ -375,10 +375,10 @@ static void qcu_cudaMemcpy(VirtioQCArg *arg)
 //	struct  timezone   tz;	 //cocotion test time
 //	gettimeofday(&start, &tz); //cocotion test time 
 	//printf("sec = %lu, usec = %lu\n", start.tv_sec, start.tv_usec)	; //cocotion test time
-
+	
+	cudaError_t err = 0;
 	uint32_t size, len, i;
 
-	cudaError_t err;
 	void *dst, *src;
 	uint64_t *gpa_array;
 
@@ -528,7 +528,7 @@ static void qcu_cudaMemcpyAsync(VirtioQCArg *arg)
 //	gettimeofday(&start, &tz); //cocotion test time 
 
 	uint32_t size, len, i;
-	cudaError_t err;
+	cudaError_t err = 0;
 	void *dst, *src;
 	uint64_t *gpa_array;
 	
@@ -704,10 +704,11 @@ static void qcu_cudaGetDevice(VirtioQCArg *arg)
 	err = 0;
 	arg->cmd = err;
 	//arg->pA = (uint64_t)device;
-	arg->pA = (uint64_t)cudaDevice;
+	//arg->pA = (uint64_t)cudaDevice;
+	arg->pA = (uint64_t)cudaDevices[cudaDeviceCurrent].device;
 	
 
-	ptrace("device= %d\n", device);
+	//ptrace("device= %d\n", device);
 }
 
 static void qcu_cudaGetDeviceCount(VirtioQCArg *arg)
@@ -935,7 +936,7 @@ static void qcu_cudaGetLastError(VirtioQCArg *arg)
 static void qcu_cudaHostRegister(VirtioQCArg *arg)
 {
 	int size, i;
-	cudaError_t err;
+	cudaError_t err = 0;
 	void *ptr;
 	uint64_t *gpa_array;
 	size = arg->pASize;
@@ -996,7 +997,7 @@ static void qcu_cudaHostUnregister(VirtioQCArg *arg)
 	uint32_t size, i;
 	void *ptr;
 	uint64_t *gpa_array;
-	cudaError_t err;
+	cudaError_t err = 0;
 	size = arg->pASize;
 	
 	gpa_array = gpa_to_hva(arg->pA);
