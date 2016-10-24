@@ -82,7 +82,11 @@ uint32_t cudaStreamNum;
 
 typedef struct kernelInfo
 {
-	VirtioQCArg theArg;
+	//VirtioQCArg theArg;
+	void *fatBin;
+	char functionName[50];
+	uint32_t funcId;
+
 }kernelInfo;
 
 typedef struct cudaDev
@@ -130,6 +134,7 @@ static void loadModuleKernels(int devId, void *fBin, char *fName,  uint32_t fId,
 {
 	pfunc();
 	ptrace("loading module.... fatBin= %16p ,name= '%s', fId = '%d'\n", fBin, fName, fId);
+	printf("cocotion @@ loading module.... fatBin= %16p ,name= '%s', fId = '%d'\n", fBin, fName, fId);
 	cuError( cuModuleLoadData( &cudaDevices[devId].module, fBin ));
 	cuError( cuModuleGetFunction(&cudaDevices[devId].cudaFunction[fNum],
 									cudaDevices[devId].module, fName) );
@@ -146,9 +151,14 @@ static void reloadAllKernels(void)
 
 	for(i = 0; i < cudaFunctionNum; i++)
 	{
-		fb = gpa_to_hva( devicesKernels[i].theArg.pA );
-		fn = gpa_to_hva( devicesKernels[i].theArg.pB );
-		fId = devicesKernels[i].theArg.flag;
+		//fb = gpa_to_hva( devicesKernels[i].theArg.pA );
+		//fn = gpa_to_hva( devicesKernels[i].theArg.pB );
+		//fId = devicesKernels[i].theArg.flag;
+		fb = devicesKernels[i].fatBin;
+		fn = devicesKernels[i].functionName;
+		fId = devicesKernels[i].funcId;
+
+		printf("@@ cudaDeviceCurrent = %d fId = %d, fn = %s\n", cudaDeviceCurrent, fId, fn);
  		loadModuleKernels( cudaDeviceCurrent, fb, fn, fId, i );
 	}	
 }
@@ -172,6 +182,7 @@ static cudaError_t initializeDevice(void)
 		{
 			cuError( cuCtxSetCurrent(cudaDevices[device].context) );
 			ptrace("cuda device %d\n", cudaDevices[device].device);
+			printf("cocotion @@ cuda device %d\n", cudaDevices[device].device);
 		}
 		if( cudaDevices[device].kernelsLoaded == 0 )
 			reloadAllKernels();
@@ -269,14 +280,26 @@ static void qcu_cudaRegisterFunction(VirtioQCArg *arg)
 	functionName = gpa_to_hva(arg->pB);
 	funcId		 = arg->flag;
 
-	memcpy( &devicesKernels[cudaFunctionNum].theArg, arg, sizeof(VirtioQCArg) );
+	//initialize the kernelInfo
+	int i;
+	for(i = 0; i < cudaFunctionMaxNum; i++)
+		devicesKernels[i].fatBin = malloc(4*1024*1024);
+
+	//memcpy( &devicesKernels[cudaFunctionNum].theArg, arg, sizeof(VirtioQCArg) );
+
+	memcpy(devicesKernels[cudaFunctionNum].fatBin, fatBin, arg->pASize);
+	memcpy(devicesKernels[cudaFunctionNum].functionName, functionName, arg->pBSize);
+	devicesKernels[cudaFunctionNum].funcId = funcId;
+
 
 	ptrace("fatBin= %16p ,name= '%s'\n", fatBin, functionName);
+//	printf("@@!!!278 cocotion test: name= '%s'\n", (char*)gpa_to_hva(devicesKernels[cudaFunctionNum].theArg.pB));
 	//cuError( cuModuleLoadData( &cudaModule, fatBin ));
 	//cuError( cuModuleGetFunction(&cudaFunction[cudaFunctionNum], 
 	//			cudaModule, functionName) );
 	//cudaFunctionId[cudaFunctionNum] = funcId;
 
+	printf("@@ cudaDeviceCurrent = %d fId = %d\n", cudaDeviceCurrent, funcId);
 	loadModuleKernels( cudaDeviceCurrent, fatBin, functionName, funcId, cudaFunctionNum );
 
 	cudaFunctionNum++;

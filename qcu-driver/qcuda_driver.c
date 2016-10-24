@@ -353,6 +353,9 @@ void qcu_cudaRegisterFunction(VirtioQCArg *arg)
 			
 	qcu_misc_send_cmd(arg);
 
+	//TODO: //cocotion test
+	// removed so fatbin available after reset devices
+	// freed in library UnregisterFatBinary function
 	kfree_gpa(arg->pA, arg->pASize);
 	kfree_gpa(arg->pB, arg->pBSize);
 }
