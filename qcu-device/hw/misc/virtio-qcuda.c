@@ -248,12 +248,12 @@ static void qcu_cudaUnregisterFatBinary(VirtioQCArg *arg)
 	uint32_t i;
 	pfunc();
 
-	for(i=0; i<cudaEventMaxNum; i++)
-	{
-		if( cudaEvent[i] != 0 ){
-			cudaError( cudaEventDestroy(cudaEvent[i]));
-		}
-	}
+	//for(i=0; i<cudaEventMaxNum; i++)
+	//{
+		//if( cudaEvent[i] != 0 ){
+		//	cudaError( cudaEventDestroy(cudaEvent[i]));
+		//}
+	//}
 
 	for(i = 0; i < totalDevices; i++)
 	{
@@ -281,9 +281,9 @@ static void qcu_cudaRegisterFunction(VirtioQCArg *arg)
 	funcId		 = arg->flag;
 
 	//initialize the kernelInfo
-	int i;
-	for(i = 0; i < cudaFunctionMaxNum; i++)
-		devicesKernels[i].fatBin = malloc(4*1024*1024);
+	//int i;
+	//for(i = 0; i < cudaFunctionMaxNum; i++)
+	devicesKernels[cudaFunctionNum].fatBin = malloc(4*1024*1024);
 
 	//memcpy( &devicesKernels[cudaFunctionNum].theArg, arg, sizeof(VirtioQCArg) );
 
@@ -293,6 +293,8 @@ static void qcu_cudaRegisterFunction(VirtioQCArg *arg)
 
 
 	ptrace("fatBin= %16p ,name= '%s'\n", fatBin, functionName);
+	printf("in cudaRegisterFunction: fatBin= %16p ,name= '%s'\n", fatBin, functionName);
+	printf("in cudaRegisterFunction, devicesKernels[cudaFunctionNum].fatBin: fatBin= %16p \n", devicesKernels[cudaFunctionNum].fatBin);
 //	printf("@@!!!278 cocotion test: name= '%s'\n", (char*)gpa_to_hva(devicesKernels[cudaFunctionNum].theArg.pB));
 	//cuError( cuModuleLoadData( &cudaModule, fatBin ));
 	//cuError( cuModuleGetFunction(&cudaFunction[cudaFunctionNum], 
@@ -935,7 +937,7 @@ static void qcu_cudaEventDestroy(VirtioQCArg *arg)
 	idx = arg->pA;
 	cudaError((err = cudaEventDestroy(cudaEvent[idx])));
 	arg->cmd = err;
-	memset(&cudaEvent[idx], 0, sizeof(cudaEvent_t));
+	//memset(&cudaEvent[idx], 0, sizeof(cudaEvent_t));
 
 	ptrace("destroy event %u\n", idx);
 }
