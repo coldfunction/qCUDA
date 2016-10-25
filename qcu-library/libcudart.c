@@ -16,8 +16,6 @@
 #include "time_measure.h"
 #include "../qcu-driver/qcuda_common.h"
 
-//#define PAGE_SIZE 4096 //hardcode work
-
 #if 0
 #define pfunc() printf("### %s at line %d\n", __func__, __LINE__)
 #else
@@ -51,8 +49,6 @@ uint64_t cudaKernelConf[8];
 #define cudaKernelParaMaxSize 128
 uint8_t cudaKernelPara[ cudaKernelParaMaxSize ];
 uint32_t cudaParaSize;
-
-//void *myfat = (int[]){0}; //cocotion
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -394,9 +390,6 @@ cudaError_t cudaMemcpy(
 		size_t count,  
 		enum cudaMemcpyKind kind)
 {
-//	struct  timeval    start, stop, diff; //cocotion test time
-//	struct  timezone   tz;	 //cocotion test time
-//	gettimeofday(&start, &tz); //cocotion test time 
 	VirtioQCArg arg;
 	
 	pfunc();
@@ -410,22 +403,12 @@ cudaError_t cudaMemcpy(
 		ptr( arg.pA, dst, 0);
 		ptr( arg.pB, src, count);
 		arg.flag   = 1;
-		
-//		gettimeofday(&stop, &tz); //cocotion test time 
-//		diff.tv_sec = stop.tv_sec - start.tv_sec; //cocotion test time	
-//		diff.tv_usec = stop.tv_usec - start.tv_usec; //cocotion test time
-//		printf("HTOD = %lu sec, %lu usec\n", diff.tv_sec, diff.tv_usec)	; //cocotion test time
 	}
 	else if( kind == cudaMemcpyDeviceToHost )
 	{
 		ptr( arg.pA, dst, count);
 		ptr( arg.pB, src, 0);
 		arg.flag   = 2;
-		
-//		gettimeofday(&stop, &tz); //cocotion test time 
-//		diff.tv_sec = stop.tv_sec - start.tv_sec; //cocotion test time	
-//		diff.tv_usec = stop.tv_usec - start.tv_usec; //cocotion test time
-//		printf("DTOH = %lu sec, %lu usec\n", diff.tv_sec, diff.tv_usec)	; //cocotion test time
 	}
 	else if( kind == cudaMemcpyDeviceToDevice )
 	{
@@ -446,11 +429,6 @@ cudaError_t cudaMemcpy(
 	}else if(kind==2){
 		time_end(t_MemcpyD2H);
 	}
-//	gettimeofday(&stop, &tz); //cocotion test time 
-//	diff.tv_sec = stop.tv_sec - start.tv_sec; //cocotion test time	
-//	diff.tv_usec = stop.tv_usec - start.tv_usec; //cocotion test time
-	
-//	printf("total = %lu sec, %lu usec\n", diff.tv_sec, diff.tv_usec)	; //cocotion test time
 	
 	return (cudaError_t)arg.cmd;
 }
@@ -462,9 +440,6 @@ cudaError_t cudaMemcpyAsync(
 		enum cudaMemcpyKind 	kind,
 		cudaStream_t 	stream)		
 {
-//	struct  timeval    start, stop, diff; //cocotion test time
-//	struct  timezone   tz;	 //cocotion test time
-//	gettimeofday(&start, &tz); //cocotion test time 
 	VirtioQCArg arg;
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
@@ -477,11 +452,6 @@ cudaError_t cudaMemcpyAsync(
 		//arg.rnd = (uint64_t)stream;
 		arg.rnd = mystream;
 		arg.flag   = 1;
-		
-//		gettimeofday(&stop, &tz); //cocotion test time 
-//		diff.tv_sec = stop.tv_sec - start.tv_sec; //cocotion test time	
-//		diff.tv_usec = stop.tv_usec - start.tv_usec; //cocotion test time
-//		printf("HTOD = %lu sec, %lu usec\n", diff.tv_sec, diff.tv_usec)	; //cocotion test time
 	}
 	else if( kind == cudaMemcpyDeviceToHost )
 	{
@@ -490,10 +460,6 @@ cudaError_t cudaMemcpyAsync(
 		//arg.rnd = (uint64_t)stream;
 		arg.rnd = mystream;
 		arg.flag   = 2;
-//		gettimeofday(&stop, &tz); //cocotion test time 
-//		diff.tv_sec = stop.tv_sec - start.tv_sec; //cocotion test time	
-//		diff.tv_usec = stop.tv_usec - start.tv_usec; //cocotion test time
-//		printf("DTOH = %lu sec, %lu usec\n", diff.tv_sec, diff.tv_usec)	; //cocotion test time
 	}
 	else if( kind == cudaMemcpyDeviceToDevice )
 	{
@@ -510,11 +476,7 @@ cudaError_t cudaMemcpyAsync(
 	}
 	
 	send_cmd_to_device( VIRTQC_cudaMemcpyAsync, &arg);
-	//gettimeofday(&stop, &tz); //cocotion test time 
-	//diff.tv_sec = stop.tv_sec - start.tv_sec; //cocotion test time	
-	//diff.tv_usec = stop.tv_usec - start.tv_usec; //cocotion test time
-	
-//	printf("total = %lu sec, %lu usec\n", diff.tv_sec, diff.tv_usec)	; //cocotion test time
+
 	return (cudaError_t)arg.cmd;
 }
 
@@ -775,6 +737,7 @@ cudaError_t cudaGetLastError(void)
 
 	send_cmd_to_device( VIRTQC_cudaGetLastError, &arg);
 
+	//TODO:
 	//fix register mem
     if(arg.cmd == 62) 
     {   
@@ -852,7 +815,6 @@ cudaError_t cudaStreamCreate(cudaStream_t *pStream)
 
 cudaError_t cudaStreamDestroy(cudaStream_t stream) 
 {
-
 	VirtioQCArg arg;
 
 	memset(&arg, 0, sizeof(VirtioQCArg));
@@ -863,7 +825,6 @@ cudaError_t cudaStreamDestroy(cudaStream_t stream)
 	return (cudaError_t)arg.cmd;
 
 }	
-
 
 // Macro to aligned up to the memory size in question                                                         
 #define MEMORY_ALIGNMENT  4096
@@ -881,7 +842,6 @@ cudaError_t cudaMallocHost(void **pHost, size_t size)
 {
 	return cudaHostAlloc(pHost, size, cudaHostAllocDefault);
 }
-
 
 cudaError_t cudaSetDeviceFlags(unsigned int flags) 	
 {

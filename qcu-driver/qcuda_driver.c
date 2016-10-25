@@ -353,9 +353,6 @@ void qcu_cudaRegisterFunction(VirtioQCArg *arg)
 			
 	qcu_misc_send_cmd(arg);
 
-	//TODO: //cocotion test
-	// removed so fatbin available after reset devices
-	// freed in library UnregisterFatBinary function
 	kfree_gpa(arg->pA, arg->pASize);
 	kfree_gpa(arg->pB, arg->pBSize);
 }
@@ -453,12 +450,10 @@ void user_kernel_copy_send_cmd(VirtioQCArg *arg, uint64_t addr, uint32_t size)
 
 void qcu_cudaMemcpy(VirtioQCArg *arg, void *dev)
 {
-//	do_gettimeofday(&start); //cocotion test time
- 
 //#ifdef USER_KERNEL_COPY
 	void* u_dst = NULL;
 //#endif
-	struct virtio_qc_mmap *priv; //cocotion
+	struct virtio_qc_mmap *priv; 
 	uint64_t gasp;
 	priv = dev;	
 	pfunc();
@@ -492,22 +487,8 @@ void qcu_cudaMemcpy(VirtioQCArg *arg, void *dev)
 			else 
 			{
 				arg->pB = gasp;
-				
-//				do_gettimeofday(&stop); //cocotion test time
-//				diff.tv_sec = stop.tv_sec-start.tv_sec; //cocotion test time	
-//				diff.tv_usec = stop.tv_usec-start.tv_usec;	//cocotion test time
-			
 				qcu_misc_send_cmd(arg);
-		
-//				do_gettimeofday(&start); //cocotion test time
-
 				free_gpa_array(arg->pB);
-				
-//				do_gettimeofday(&stop); //cocotion test time
-//				diff.tv_sec += stop.tv_sec-start.tv_sec; //cocotion test time	
-//				diff.tv_usec += stop.tv_usec-start.tv_usec;	//cocotion test time
-	
-//				printk("H2D: %lu (%lu)\n", diff.tv_sec, diff.tv_usec); //cocotion test time
 			}
 #ifdef USER_KERNEL_COPY
 		}	
@@ -533,8 +514,6 @@ void qcu_cudaMemcpy(VirtioQCArg *arg, void *dev)
 		if(arg->pASize > QCU_KMALLOC_MAX_SIZE)
 		{
 #endif
-			//arg->pA = get_gpa_array_start_phys(arg->pA, priv, arg->pASize, &(arg->pBSize));
-
 			gasp = get_gpa_array_start_phys(arg->pA, priv, arg->pASize, &(arg->pBSize));
 
 			//group 		= find_page_group(arg->pA, dev);
@@ -544,7 +523,6 @@ void qcu_cudaMemcpy(VirtioQCArg *arg, void *dev)
 
 			if(gasp == (uint64_t)-1) 
 			{
-			
 				arg->para = 1;	
 				u_dst = (void*)arg->pA;
 				arg->pA = user_to_gpa( 0, arg->pASize); // host
@@ -554,28 +532,12 @@ void qcu_cudaMemcpy(VirtioQCArg *arg, void *dev)
 			
 				gpa_to_user(u_dst, arg->pA, arg->pASize);
 				kfree_gpa(arg->pA, arg->pASize);
-				
 			}	
 			else
 			{
-				
 				arg->pA = gasp;
-
-//				do_gettimeofday(&stop); //cocotion test time
-//				diff.tv_sec = stop.tv_sec-start.tv_sec; //cocotion test time	
-//				diff.tv_usec = stop.tv_usec-start.tv_usec;	//cocotion test time
-			
 				qcu_misc_send_cmd(arg);
-		
-	
-//				do_gettimeofday(&start); //cocotion test time
-	
 				free_gpa_array(arg->pA);
-
-//				do_gettimeofday(&stop); //cocotion test time
-//				diff.tv_sec += stop.tv_sec-start.tv_sec; //cocotion test time	
-//				diff.tv_usec += stop.tv_usec-start.tv_usec;	//cocotion test time
-//				printk("D2H: %lu (%lu)\n", diff.tv_sec, diff.tv_usec); //cocotion test time
 			}
 
 #ifdef USER_KERNEL_COPY
@@ -606,44 +568,23 @@ void qcu_cudaMemcpy(VirtioQCArg *arg, void *dev)
 
 void qcu_cudaMemcpyAsync(VirtioQCArg *arg, void *dev)
 {
-//	do_gettimeofday(&start); //cocotion test time
 	uint64_t gasp;
-	struct virtio_qc_mmap *priv; //cocotion
-	//struct virtio_qc_page *group;
+	struct virtio_qc_mmap *priv;
 	priv = dev;
 
 	if( arg->flag == 1 ) // cudaMemcpyHostToDevice
 	{
 		gasp = get_gpa_array_start_phys(arg->pB, priv, arg->pBSize, &(arg->pASize));
-			
 		arg->pB = gasp;
-//				do_gettimeofday(&stop); //cocotion test time
-//				diff.tv_sec = stop.tv_sec-start.tv_sec; //cocotion test time	
-//				diff.tv_usec = stop.tv_usec-start.tv_usec;	//cocotion test time
 		qcu_misc_send_cmd(arg);
-//				do_gettimeofday(&start); //cocotion test time
 		free_gpa_array(arg->pB);
-//				do_gettimeofday(&stop); //cocotion test time
-//				diff.tv_sec += stop.tv_sec-start.tv_sec; //cocotion test time	
-//				diff.tv_usec += stop.tv_usec-start.tv_usec;	//cocotion test time
-	
-//				printk("H2D: %lu (%lu)\n", diff.tv_sec, diff.tv_usec); //cocotion test time
 	}
 	else if(arg->flag == 2)
 	{
 		gasp = get_gpa_array_start_phys(arg->pA, priv, arg->pASize, &(arg->pBSize));
-				
 		arg->pA = gasp;
-//				do_gettimeofday(&stop); //cocotion test time
-//				diff.tv_sec = stop.tv_sec-start.tv_sec; //cocotion test time	
-//				diff.tv_usec = stop.tv_usec-start.tv_usec;	//cocotion test time
 		qcu_misc_send_cmd(arg);
-//				do_gettimeofday(&start); //cocotion test time
 		free_gpa_array(arg->pA);
-//				do_gettimeofday(&stop); //cocotion test time
-//				diff.tv_sec += stop.tv_sec-start.tv_sec; //cocotion test time	
-//				diff.tv_usec += stop.tv_usec-start.tv_usec;	//cocotion test time
-//				printk("D2H: %lu (%lu)\n", diff.tv_sec, diff.tv_usec); //cocotion test time
 	}
 	else if (arg->flag == 3)
 	{
@@ -947,7 +888,6 @@ err_open:
 	return -EBADF;
 }
 
-
 static void qcummap(struct virtio_qc_mmap *priv)
 {
 	VirtioQCArg *arg;
@@ -965,9 +905,6 @@ static void qcummap(struct virtio_qc_mmap *priv)
 
 	kfree(arg);
 }
-
-
-
 
 /////////zero-copy/////////
 
@@ -993,7 +930,6 @@ void qcu_cudaHostRegister(VirtioQCArg *arg, struct virtio_qc_mmap *priv)
 	arg->rnd = arg->pA - group->uvm_start; //offset 
 	arg->pBSize = group->file; //fd
 	//fix for cudaHostGetDevicePointer end
-
  
 	arg->pA = gasp;
 	qcu_misc_send_cmd(arg);
@@ -1083,7 +1019,6 @@ void qcu_cudaFreeHost(VirtioQCArg *arg, struct virtio_qc_mmap *priv)
 	struct virtio_qc_page *group;
 //	uint64_t p = arg->pA;	
 //	qcu_cudaHostUnregister(arg, priv);
-
 
 	//TODO: if not find
 	group = find_page_group(arg->pA, priv);
@@ -1643,6 +1578,6 @@ module_init(init);
 module_exit(fini);
 
 MODULE_DEVICE_TABLE(virtio, id_table);
-MODULE_DESCRIPTION("Qemu Virtio CUDA CUDA(qcu) driver");
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("CJacky (Jacky Chen)");
+MODULE_DESCRIPTION("Qemu Virtio CUDA(qcu) driver");
+MODULE_LICENSE("MIT");
+MODULE_AUTHOR("Yu-Shiang Lin");
