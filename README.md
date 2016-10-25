@@ -44,3 +44,4 @@ accessing the GPU.
 ## Contributors
 * Yu-Shiang Lin
 * Luis Herrera
+* Jia-Chi Chen
