@@ -1,26 +1,18 @@
 ##qCUDA
 qCUDA is based on the virtio framework to provide the para-virtualized driver as “front-end”, 
 and the device module as “back-end” for performing the interaction with API remoting and memory management. 
-In our test environment, qCUDA can achieve above 95% of the bandwidth efficiency for most results by comparing
-with the native approach. In addition, by comparing with prior work, qCUDA has more flexibility and interposition 
-that it can execute CUDA-compatible programs in the Linux and Windows VMs, respectively, on QEMU-KVM hypervisor 
-for GPGPU virtualization.
+In our test environment, qCUDA can achieve above 95% of the bandwidth efficiency for most results by comparing with the native. In addition, by comparing with prior work, qCUDA has more flexibility and interposition that it can execute CUDA-compatible programs in the Linux and Windows VMs, respectively, on QEMU-KVM hypervisor for GPGPU virtualization.
 
 ##System Components
 
 The framework of qCUDA has three components, including qCUlibrary, qCUdriver and qCUdevice; the functions of 
 these three components are defined as follows:
 
-* qCUlibrary (<b>qcu-library</b>) – The interposer library in VM (guest OS) provided CUDA runtime access, 
-interface of memory allocation, qCUDA command (qCUcmd), and passing the qCUcmd to the qCUdriver.
+* qCUlibrary (`qcu-library`) – The interposer library in VM (guest OS) provided CUDA runtime access, interface of memory allocation, qCUDA command (qCUcmd), and passing the qCUcmd to the qCUdriver.
 
-* qCUdriver (<b>qcu-driver</b>) – The front-end driver was responsible for the memory management, data movement, analyzing 
-the qCUcmd from the qCUlibrary, and passing the qCUcmd by the control channel which is connected to the qCUdevice.
+* qCUdriver (`qcu-driver`) – The front-end driver was responsible for the memory management, data movement, analyzing the qCUcmd from the qCUlibrary, and passing the qCUcmd by the control channel which is connected to the qCUdevice.
 
-* qCUdevice (<b>qcu-device</b>) – The virtual device as the back-end was responsible for receiving/sending the qCUcmd through the control channel;
-it depended on receiving the qCUcmd to active related operations in the host, including to register GPU binary, 
-convert guest physical addresses (GPA) into host virtual addresses (HVA), and handle the CUDA runtime/driver APIs for 
-accessing the GPU.
+* qCUdevice (qcu-device) – The virtual device as the back-end was responsible for receiving/sending the qCUcmd through the control channel; it depended on receiving the qCUcmd to active related operations in the host, including to register GPU binary, convert guest physical addresses (GPA) into host virtual addresses (HVA), and handle the CUDA runtime/driver APIs for accessing the GPU.
 
 ##Installation
 ###Prerequisites
