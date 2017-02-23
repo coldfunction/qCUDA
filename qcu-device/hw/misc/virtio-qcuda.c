@@ -5,12 +5,17 @@
 #include "hw/virtio/virtio-bus.h"
 #include "hw/virtio/virtio-qcuda.h"
 #include <sys/mman.h>
+//#include <stdio.h>
 
 #ifdef CONFIG_CUDA
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <builtin_types.h>
 #endif
+
+
+#define AUTO_ASSIGN_GPU_ENABLE
+
 
 #if 0
 #define pfunc() printf("### %s at line %d\n", __func__, __LINE__)
@@ -213,13 +218,30 @@ static void qcu_cudaRegisterFatBinary(VirtioQCArg *arg)
 		memset(&cudaDevices[i].cudaFunction, 0, sizeof(CUfunction) * cudaFunctionMaxNum);
  		cudaDevices[i].kernelsLoaded = 0;
 	}
+	//do loadbalance
+#ifdef AUTO_ASSIGN_GPU_ENABLE
+	//open and execute the select_gpu.py
+	FILE *fp;
+	char buffer[20];
+	int id = 0;
+	fp=popen("python /home/cocotion/qcuda/select_gpu.py", "r");
+	id = (fgets(buffer, sizeof(buffer), fp) != NULL)?atoi(buffer):0;
 
+	pclose(fp);
+
+	cudaDeviceCurrent = cudaDevices[id].device; // used when calling cudaGetDevice
+
+	initializeDevice();
+
+
+#else
 	cudaDeviceCurrent = cudaDevices[0].device; // used when calling cudaGetDevice
-	
+#endif
+
 	cudaFunctionNum = 0;
 	cudaEventNum = 0;
 
-	cudaStreamNum = 1;
+	cudaStreamNum = 0;
 	
 	cudaContext_count = 1;
 }
