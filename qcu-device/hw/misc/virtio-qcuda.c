@@ -224,7 +224,7 @@ static void qcu_cudaRegisterFatBinary(VirtioQCArg *arg)
 	FILE *fp;
 	char buffer[20];
 	int id = 0;
-	fp=popen("python /home/cocotion/qcuda/select_gpu.py", "r");
+	fp=popen("python /home/coldfunction/qCUDA_0.1/qCUDA/select_gpu.py", "r");
 	id = (fgets(buffer, sizeof(buffer), fp) != NULL)?atoi(buffer):0;
 
 	pclose(fp);
