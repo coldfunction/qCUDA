@@ -1,9 +1,12 @@
+from atomicwrites import atomic_write
 from subprocess import check_output, CalledProcessError
 
 class Utilization:
     def __init__(self, gpu, memory):
         self.gpu    = float(gpu)
         self.memory = float(memory)
+        if self.gpu < 2:
+            self.gpu = 2
     def set_gpu(self, gpu):
         self.gpu    = gpu
     def set_mem(self, memory):
@@ -50,10 +53,45 @@ for i in range(device_num):
     #print device_obj[i].cap
     #print device_obj[i].id
 
+v_gpu = []
+f_gpu = []
+file = open('/home/coldfunction/qCUDA_0.1/qCUDA/.gpu_info', 'r')
+for i in range(device_num):
+    line = file.readline()
+    num = float(line)
+    
+    v_gpu.append(num)
+    f_gpu.append(num)
+#    if num == 0:
+#        print(num)
+file.close()
+
+
+for i in range(device_num):
+    if v_gpu[i] == 0:
+        v_gpu[i] = 1.0 
+   
+    device_obj[i].cap = (v_gpu[i] * device_obj[i].cap)
+    #print (device_obj[i].cap)
+
+    #print(v_gpu[i])
+    
+
 #print
 device_obj.sort(key=lambda i: i.cap) 
-#print device_obj[0].cap
-print device_obj[0].id
+
+id = device_obj[0].id
+
+f_gpu[id] = device_obj[0].cap
+
+with atomic_write('/home/coldfunction/qCUDA_0.1/qCUDA/.gpu_info', overwrite=True) as f:
+    for i in range(device_num):
+        f.write(str(f_gpu[i]))
+        f.write('\n')
+
+print id
+
+
 
 
 #f = open(".select_g", 'w')
