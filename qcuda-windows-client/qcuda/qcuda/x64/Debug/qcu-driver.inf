@@ -1,0 +1,102 @@
+;
+; qcu-driver.inf
+;
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=Network adapters; TODO: edit Class
+ClassGuid={78A1C341-4539-11d3-B88D-00C04FAD5171} ; TODO: edit ClassGuid
+Provider=%ManufacturerName%
+CatalogFile=qcu-driver.cat
+DriverVer=03/15/2017,13.44.50.845
+
+[DestinationDirs]
+DefaultDestDir = 12
+
+; ================= Class section =====================
+
+[ClassInstall32]
+Addreg=SampleClassReg
+
+[SampleClassReg]
+HKR,,,0,%ClassName%
+HKR,,Icon,,-5
+HKR,,Security,,"D:(D;OICI;GA;;;BG)(D;OICI;GA;;;AN)(A;OICI;GRGWGX;;;AU)(A;OICI;GA;;;BA)" 
+; HKR,,DeviceCharacteristics,0x10001,0x100
+; D:P(A;;GA;;;SY)(A;;GA;;;BA)
+; D:P(A;CI;GA;;;BA)(A;CI;GA;;;SY)
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+qcu-driver.sys  = 1,,
+
+;*****************************************
+; Install Section
+;*****************************************
+
+[Manufacturer]
+%ManufacturerName%=Standard,NTamd64
+
+[Standard.NTamd64]
+%qcu-driver.DeviceDesc%=qcu-driver_Device, PCI\VEN_1AF4&DEV_1012&SUBSYS_00451AF4&REV_00 ; TODO: edit hw-id
+
+[qcu-driver_Device.NT]
+CopyFiles=Drivers_Dir
+
+[Drivers_Dir]
+qcu-driver.sys
+
+;-------------- Service installation
+[qcu-driver_Device.NT.Services]
+AddService = qcu-driver,%SPSVCINST_ASSOCSERVICE%, qcu-driver_Service_Inst
+
+; -------------- qcu-driver driver install sections
+[qcu-driver_Service_Inst]
+DisplayName    = %qcu-driver.SVCDESC%
+ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
+StartType      = 3               ; SERVICE_DEMAND_START
+ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %12%\qcu-driver.sys
+
+;
+;--- qcu-driver_Device Coinstaller installation ------
+
+;
+
+[DestinationDirs]
+qcu-driver_Device_CoInstaller_CopyFiles = 11
+
+[qcu-driver_Device.NT.CoInstallers]
+AddReg=qcu-driver_Device_CoInstaller_AddReg
+CopyFiles=qcu-driver_Device_CoInstaller_CopyFiles
+
+[qcu-driver_Device_CoInstaller_AddReg]
+HKR,,CoInstallers32,0x00010000, "WdfCoInstaller01009.dll,WdfCoInstaller"
+
+; [qcu-driver_Device.NTamd64.HW]
+; AddReg=driver_Device.ntamd64.AddReg
+
+; [driver_Device.ntamd64.AddReg]
+; HKR,,DeviceCharacteristics,0x10001,0x0100
+; HKR,,Security,,"D:(D;OICI;GA;;;BG)(D;OICI;GA;;;AN)(A;OICI;GRGWGX;;;AU)(A;OICI;GA;;;BA)" 
+
+[qcu-driver_Device_CoInstaller_CopyFiles]
+WdfCoInstaller01009.dll
+
+[SourceDisksFiles]
+WdfCoInstaller01009.dll=1 ; make sure the number matches with SourceDisksNames
+
+[qcu-driver_Device.NT.Wdf]
+KmdfService =  qcu-driver, qcu-driver_wdfsect
+[qcu-driver_wdfsect]
+KmdfLibraryVersion = 1.9
+
+[Strings]
+SPSVCINST_ASSOCSERVICE= 0x00000002
+ManufacturerName="Luis Herrera" ;TODO: Replace with your manufacturer name
+ClassName="Network adapters"; TODO: edit ClassName
+DiskName = "qcu-driver Installation Disk"
+qcu-driver.DeviceDesc = "qcu-driver Device"
+qcu-driver.SVCDESC = "qcu-driver Service"

@@ -19,7 +19,7 @@ these three components are defined as follows:
 * CUDA 7.5
 * Ubuntu 14.04.3 LTS (GNU/Linux 3.19.0-25-generic x86_64)
 * Ubuntu 14.04 image (guest OS)
-* Windows 8 image (guest OS)
+* Windows 7 or later image (guest OS)
 
 ###How to install
 * qcu-device was modified from QEMU 2.4.0, under this forder add the "--enable-cuda option" in the configure: 
