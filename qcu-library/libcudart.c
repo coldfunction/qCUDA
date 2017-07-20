@@ -136,6 +136,11 @@ void free(void* ptr)
 /// Module & Execution control
 ////////////////////////////////////////////////////////////////////////////////
 
+void __cudaInitModule()
+{
+
+}
+
 void** __cudaRegisterFatBinary(void *fatCubin)
 {
 	open_device();

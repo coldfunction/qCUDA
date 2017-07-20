@@ -13,7 +13,7 @@
 #endif
 
 
-#define AUTO_ASSIGN_GPU_ENABLE
+//#define AUTO_ASSIGN_GPU_ENABLE
 
 
 #if 0
@@ -223,7 +223,7 @@ static void qcu_cudaRegisterFatBinary(VirtioQCArg *arg)
 	FILE *fp;
 	char buffer[20];
 	int id = 0;
-	fp=popen("python /home/coldfunction/qCUDA_0.1/qCUDA/gfs.py", "r");
+	fp=popen("python /home/coldfunction/qCUDA_0.2/qCUDA/gfs.py", "r");
 	id = (fgets(buffer, sizeof(buffer), fp) != NULL)?atoi(buffer):0;
 
 	pclose(fp);

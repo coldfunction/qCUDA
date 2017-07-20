@@ -55,7 +55,7 @@ for i in range(device_num):
 
 v_gpu = []
 f_gpu = []
-file = open('/home/coldfunction/qCUDA_0.1/qCUDA/.gpu_info', 'r')
+file = open('/home/coldfunction/qCUDA_0.2/qCUDA/.gpu_info', 'r')
 for i in range(device_num):
     line = file.readline()
     num = float(line)
@@ -84,7 +84,7 @@ id = device_obj[0].id
 
 f_gpu[id] = device_obj[0].cap
 
-with atomic_write('/home/coldfunction/qCUDA_0.1/qCUDA/.gpu_info', overwrite=True) as f:
+with atomic_write('/home/coldfunction/qCUDA_0.2/qCUDA/.gpu_info', overwrite=True) as f:
     for i in range(device_num):
         f.write(str(f_gpu[i]))
         f.write('\n')
