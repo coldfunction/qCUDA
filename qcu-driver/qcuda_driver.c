@@ -1044,6 +1044,11 @@ void qcu_cudaStreamDestroy(VirtioQCArg *arg)
 	qcu_misc_send_cmd(arg);
 }
 
+void qcu_cudaStreamSynchronize(VirtioQCArg *arg)
+{
+	qcu_misc_send_cmd(arg);
+}
+
 
 // @_cmd: device command
 // @_arg: argument of cuda function
@@ -1214,6 +1219,10 @@ static long qcu_misc_ioctl(struct file *filp, unsigned int _cmd, unsigned long _
 		
 		case VIRTQC_cudaStreamDestroy:
 			qcu_cudaStreamDestroy(arg);
+			break;
+
+		case VIRTQC_cudaStreamSynchronize:
+			qcu_cudaStreamSynchronize(arg);
 			break;
 
 		default:

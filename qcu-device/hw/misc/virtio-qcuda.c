@@ -923,6 +923,18 @@ static void qcu_cudaStreamDestroy(VirtioQCArg *arg)
 	memset(&cudaStream[idx], 0, sizeof(cudaStream_t));
 }
 
+static void qcu_cudaStreamSynchronize(VirtioQCArg *arg)
+{
+	cudaError_t err;
+	uint32_t idx;
+	idx = arg->pA;
+
+	cudaError((err = cudaStreamSynchronize(cudaStream[idx])));
+	
+	arg->cmd = err;
+}
+
+
 #endif // CONFIG_CUDA
 
 static int qcu_cmd_write(VirtioQCArg *arg)
@@ -1250,6 +1262,10 @@ static void virtio_qcuda_cmd_handle(VirtIODevice *vdev, VirtQueue *vq)
 			
 			case VIRTQC_cudaStreamDestroy:
 				qcu_cudaStreamDestroy(arg);	
+				break;
+
+			case VIRTQC_cudaStreamSynchronize:
+				qcu_cudaStreamSynchronize(arg);
 				break;
 
 			// Event Management (runtime API)

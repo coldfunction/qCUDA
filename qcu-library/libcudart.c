@@ -821,7 +821,6 @@ cudaError_t cudaStreamCreate(cudaStream_t *pStream)
 cudaError_t cudaStreamDestroy(cudaStream_t stream) 
 {
 	VirtioQCArg arg;
-
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
 	ptr( arg.pA, stream, 0);
@@ -830,6 +829,20 @@ cudaError_t cudaStreamDestroy(cudaStream_t stream)
 	return (cudaError_t)arg.cmd;
 
 }	
+
+cudaError_t cudaStreamSynchronize(cudaStream_t 	stream) 	
+{
+	VirtioQCArg arg;
+	memset(&arg, 0, sizeof(VirtioQCArg));
+
+	uint64_t mystream = (stream==NULL)?(uint64_t)-1:(uint64_t)stream;
+
+	ptr( arg.pA, mystream, 0);
+
+	send_cmd_to_device( VIRTQC_cudaStreamSynchronize, &arg);
+
+	return (cudaError_t)arg.cmd;
+}
 
 // Macro to aligned up to the memory size in question                                                         
 #define MEMORY_ALIGNMENT  4096
@@ -867,5 +880,7 @@ cudaError_t cudaFreeHost(void *ptr)
 	send_cmd_to_device( VIRTQC_cudaFreeHost, &arg);
 	return (cudaError_t)arg.cmd;
 }
+
+
 
 
