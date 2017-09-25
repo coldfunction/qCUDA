@@ -934,6 +934,14 @@ static void qcu_cudaStreamSynchronize(VirtioQCArg *arg)
 	arg->cmd = err;
 }
 
+// Thread Management
+static void qcu_cudaThreadSynchronize(VirtioQCArg *arg)
+{
+	cudaError_t err;
+	cudaError(err = cudaThreadSynchronize());
+	
+	arg->cmd = err;
+}
 
 #endif // CONFIG_CUDA
 
@@ -1318,6 +1326,11 @@ static void virtio_qcuda_cmd_handle(VirtIODevice *vdev, VirtQueue *vq)
 			//case VIRTQC_cudaFreeHost:	
 			//	qcu_cudaFreeHost(arg);
 			//	break;
+
+			// Thread Management
+			case VIRTQC_cudaThreadSynchronize:
+				qcu_cudaThreadSynchronize(arg);
+				break;
 	
 #endif
 			default:

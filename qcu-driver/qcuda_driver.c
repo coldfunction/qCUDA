@@ -766,6 +766,17 @@ void qcu_cudaGetLastError(VirtioQCArg *arg)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+/// Thread Management
+////////////////////////////////////////////////////////////////////////////////
+
+void qcu_cudaThreadSynchronize(VirtioQCArg *arg)
+{
+	qcu_misc_send_cmd(arg);
+}
+
+
+
+////////////////////////////////////////////////////////////////////////////////
 ///	basic function
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -1223,6 +1234,12 @@ static long qcu_misc_ioctl(struct file *filp, unsigned int _cmd, unsigned long _
 
 		case VIRTQC_cudaStreamSynchronize:
 			qcu_cudaStreamSynchronize(arg);
+			break;
+
+
+		// Thread Management
+		case VIRTQC_cudaThreadSynchronize:
+			qcu_cudaThreadSynchronize(arg);
 			break;
 
 		default:

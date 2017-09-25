@@ -882,5 +882,16 @@ cudaError_t cudaFreeHost(void *ptr)
 }
 
 
+// Thread Management
+cudaError_t cudaThreadSynchronize()
+{
+	VirtioQCArg arg;
+	memset(&arg, 0, sizeof(VirtioQCArg));
+
+	send_cmd_to_device( VIRTQC_cudaThreadSynchronize, &arg);
+	return (cudaError_t)arg.cmd;
+}
+
+
 
 

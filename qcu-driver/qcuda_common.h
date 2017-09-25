@@ -79,6 +79,9 @@ enum
 	VIRTQC_cudaStreamCreate,
 	VIRTQC_cudaStreamDestroy,
 	VIRTQC_cudaStreamSynchronize,
+
+	// Thread Management
+	VIRTQC_cudaThreadSynchronize,
 };
 
 typedef struct VirtioQCArg   VirtioQCArg;
