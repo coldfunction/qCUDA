@@ -101,13 +101,13 @@ void *__zcmalloc(uint64_t size)
 
 void *malloc(uint64_t size)
 {
-#ifdef USER_KERNEL_COPY		
-	if( size > QCU_KMALLOC_MAX_SIZE)
-#endif
-		return __zcmalloc(size);
-#ifdef USER_KERNEL_COPY		
-	else
-		return __libc_malloc(size);
+#ifdef USER_KERNEL_COPY     
+    return __libc_malloc(size);
+#else
+    if( size > QCU_KMALLOC_MAX_SIZE)
+        return __zcmalloc(size);
+    else                                                                                                                                                                                            
+        return __libc_malloc(size);
 #endif
 }
 
