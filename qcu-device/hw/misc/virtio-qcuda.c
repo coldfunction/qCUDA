@@ -80,7 +80,7 @@ uint32_t cudaStreamNum;
 typedef struct kernelInfo
 {
 	void *fatBin;
-	char functionName[50];
+	char functionName[300];
 	uint32_t funcId;
 
 }kernelInfo;
@@ -641,7 +641,6 @@ static void qcu_cudaGetDevice(VirtioQCArg *arg)
 
 	unsigned int id;
 	id = getCurrentID((unsigned int)arg->rnd); 
-	printf("cocotion in cudaGetDevice id = %d\n", id);
 
 	// in case cudaReset was the previous call
 	initializeDevice(id); 
