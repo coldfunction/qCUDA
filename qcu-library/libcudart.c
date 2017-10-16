@@ -49,7 +49,7 @@ extern void __libc_free(void*);
 //uint32_t cudaKernelConf[7];
 uint64_t cudaKernelConf[8];
 
-#define cudaKernelParaMaxSize 128
+#define cudaKernelParaMaxSize 512
 uint8_t cudaKernelPara[ cudaKernelParaMaxSize ];
 uint32_t cudaParaSize;
 
