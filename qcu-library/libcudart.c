@@ -9,6 +9,9 @@
 #include <sys/ioctl.h> // ioclt
 #include <sys/mman.h>
 
+#include <sys/types.h>
+#include <sys/syscall.h>
+
 #include <builtin_types.h>
 #include <__cudaFatFormat.h>
 #include <fatBinaryCtl.h>
@@ -332,6 +335,8 @@ cudaError_t cudaLaunch(const void *func)
 	ptr( arg.pB, cudaKernelPara, cudaParaSize);
 	arg.flag = (uint32_t)(uint64_t)func;
 
+	arg.rnd  = syscall(__NR_gettid);
+
 	send_cmd_to_device( VIRTQC_cudaLaunch, &arg);
 
 	time_end(t_Launch);
@@ -352,6 +357,8 @@ cudaError_t cudaMalloc(void** devPtr, size_t size)
 	ptr( arg.pA, 0,  0);
 	arg.flag = size;
 
+	arg.rnd  = syscall(__NR_gettid); 
+
 	send_cmd_to_device( VIRTQC_cudaMalloc, &arg);
 	*devPtr = (void*)arg.pA;
 	ptrace("devPtr= %p\n", (void*)arg.pA);
@@ -368,6 +375,8 @@ cudaError_t cudaMemset(void *devPtr, int value, size_t count)
 	ptr( arg.pA, devPtr, count);
 	arg.para = value;
 
+	arg.rnd  = syscall(__NR_gettid); 
+
 	send_cmd_to_device( VIRTQC_cudaMemset, &arg);
 
 	return (cudaError_t)arg.cmd;
@@ -381,6 +390,8 @@ cudaError_t cudaFree(void* devPtr)
 
 	memset(&arg, 0, sizeof(VirtioQCArg));
 	ptr( arg.pA, devPtr, 0);
+
+	arg.rnd  = syscall(__NR_gettid); 
 
 	send_cmd_to_device( VIRTQC_cudaFree, &arg);
 	ptrace("devPtr= %p\n", (void*)arg.pA);
@@ -426,6 +437,8 @@ cudaError_t cudaMemcpy(
 		error("Not impletment cudaMemcpyKind %d\n", kind);
 		return cudaErrorInvalidValue;
 	}
+
+	arg.rnd  = syscall(__NR_gettid); 
 
 	send_cmd_to_device( VIRTQC_cudaMemcpy, &arg);
 
@@ -498,6 +511,8 @@ cudaError_t cudaGetDevice(int *device)
 
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
+	arg.rnd  = syscall(__NR_gettid);
+
 	send_cmd_to_device( VIRTQC_cudaGetDevice, &arg);
 	*device = (int)arg.pA;
 
@@ -512,6 +527,8 @@ cudaError_t cudaGetDeviceCount(int *count)
 	time_begin();
 
 	memset(&arg, 0, sizeof(VirtioQCArg));
+
+	arg.rnd  = syscall(__NR_gettid);
 
 	send_cmd_to_device( VIRTQC_cudaGetDeviceCount, &arg);
 	*count = (int)arg.pA;
@@ -542,6 +559,8 @@ cudaError_t cudaSetDevice(int device)
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
 	ptr( arg.pA, device, 0);
+	arg.rnd = syscall(__NR_gettid);
+
 	send_cmd_to_device( VIRTQC_cudaSetDevice, &arg);
 
 	time_end(t_SetDev);
@@ -585,6 +604,8 @@ cudaError_t cudaDeviceReset(void)
 	time_begin();
 
 	memset(&arg, 0, sizeof(VirtioQCArg));
+
+	arg.rnd  = syscall(__NR_gettid); 
 
 	send_cmd_to_device( VIRTQC_cudaDeviceReset, &arg);
 
