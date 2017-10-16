@@ -461,7 +461,7 @@ cudaError_t cudaMemcpyAsync(
 	VirtioQCArg arg;
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
-	uint64_t mystream = (stream==NULL)?(uint64_t)-1:(uint64_t)stream;
+	uint64_t mystream = (uint64_t)stream;
 	
 	if( kind == cudaMemcpyHostToDevice)
 	{
@@ -856,7 +856,7 @@ cudaError_t cudaStreamSynchronize(cudaStream_t 	stream)
 	VirtioQCArg arg;
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
-	uint64_t mystream = (stream==NULL)?(uint64_t)-1:(uint64_t)stream;
+	uint64_t mystream = (uint64_t)stream;
 
 	ptr( arg.pA, mystream, 0);
 

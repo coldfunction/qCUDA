@@ -46,6 +46,7 @@ uint32_t BLOCK_SIZE;
 char *deviceSpace = NULL;
 uint32_t deviceSpaceSize = 0;
 
+cudaError_t global_err; //cocotion new modify
 
 static void* gpa_to_hva(uint64_t pa) 
 {
@@ -304,9 +305,10 @@ static void qcu_cudaRegisterFunction(VirtioQCArg *arg)
 		//loadModuleKernels( cudaDeviceCurrent[i], fatBin, functionName, funcId, cudaFunctionNum );
 		loadModuleKernels( i, fatBin, functionName, funcId, cudaFunctionNum );
 	}
-	
-
 	cudaFunctionNum++;
+
+	//TODO: cudaStreamDestroy in default
+	cudaError(global_err = cudaStreamCreate(&cudaStream[0]));
 }
 
 static void qcu_cudaLaunch(VirtioQCArg *arg)
@@ -354,7 +356,7 @@ static void qcu_cudaLaunch(VirtioQCArg *arg)
 	cuError( cuLaunchKernel(cudaDevices[cudaDeviceCurrent[id]].cudaFunction[funcIdx],
 				conf[0], conf[1], conf[2],
 				conf[3], conf[4], conf[5], 
-				conf[6], (conf[7]==(uint64_t)-1)?NULL:cudaStream[conf[7]], paraBuf, NULL)); 
+				conf[6], cudaStream[conf[7]], paraBuf, NULL)); 
 	
 	free(paraBuf);
 }
@@ -544,7 +546,7 @@ static void qcu_cudaMemcpyAsync(VirtioQCArg *arg)
 	pfunc();
 	
 	uint64_t streamIdx = arg->rnd;
-	cudaStream_t stream = (streamIdx==(uint64_t)-1)?NULL:cudaStream[streamIdx];
+	cudaStream_t stream = cudaStream[streamIdx];
 	
 	if( arg->flag == cudaMemcpyHostToDevice )
 	{
@@ -817,7 +819,7 @@ static void qcu_cudaEventRecord(VirtioQCArg *arg)
 
 	eventIdx  = arg->pA;
 	streamIdx = arg->pB;
-	cudaError((err = cudaEventRecord(cudaEvent[eventIdx], (streamIdx==(uint64_t)-1)?NULL:cudaStream[streamIdx]  )));
+	cudaError((err = cudaEventRecord(cudaEvent[eventIdx], cudaStream[streamIdx])));
 	arg->cmd = err;
 
 	ptrace("event record %u\n", eventIdx);
@@ -956,7 +958,11 @@ static void qcu_cudaStreamCreate(VirtioQCArg *arg)
 {
 	cudaError_t err;
 
-	err = cudaStreamCreate(&cudaStream[cudaStreamNum]);
+	if(cudaStreamNum != 0)
+		err = cudaStreamCreate(&cudaStream[cudaStreamNum]);
+	else
+		err = global_err;
+	
 	arg->pA = cudaStreamNum;
 	cudaStreamNum++;
  	arg->cmd = err;
