@@ -871,7 +871,7 @@ cudaError_t cudaStreamSynchronize(cudaStream_t 	stream)
 
 cudaError_t cudaHostAlloc(void **pHost, size_t size, unsigned int flags)
 {
-	void *a_UA = malloc(size + MEMORY_ALIGNMENT);
+	void *a_UA = __zcmalloc(size + MEMORY_ALIGNMENT);
 	*pHost = (void *) ALIGN_UP(a_UA, MEMORY_ALIGNMENT);
 
 	return cudaHostRegister(*pHost, size, flags);
