@@ -284,7 +284,7 @@ cudaError_t cudaConfigureCall(
 
 	cudaKernelConf[6] = sharedMem;
 	
-	cudaKernelConf[7] = (stream==NULL)?(uint64_t)-1:(uint64_t)stream;
+	cudaKernelConf[7] = (stream==NULL)?(uint64_t)0:(uint64_t)stream;
 
 
 	memset(cudaKernelPara, 0, cudaKernelParaMaxSize);
