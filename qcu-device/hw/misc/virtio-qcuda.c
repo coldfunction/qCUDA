@@ -75,6 +75,7 @@ cudaEvent_t cudaEvent[cudaEventMaxNum];
 uint32_t cudaEventNum;
 
 #define cudaStreamMaxNum 32
+#define cudaStreamDefaultNum 31
 cudaStream_t cudaStream[cudaStreamMaxNum];
 uint32_t cudaStreamNum;
 
@@ -249,6 +250,8 @@ static void qcu_cudaRegisterFatBinary(VirtioQCArg *arg)
 	cudaStreamNum = 0;
 	
 	cudaContext_count = 1;
+
+	cudaError(global_err = cudaStreamCreate(&cudaStream[cudaStreamDefaultNum]));
 }
 
 static void qcu_cudaUnregisterFatBinary(VirtioQCArg *arg)
@@ -262,6 +265,8 @@ static void qcu_cudaUnregisterFatBinary(VirtioQCArg *arg)
 		//	cudaError( cudaEventDestroy(cudaEvent[i]));
 		//}
 	//}
+
+	cudaStreamDestroy(cudaStream[cudaStreamDefaultNum]);
 
 	for(i = 0; i < totalDevices; i++)
 	{
@@ -819,7 +824,12 @@ static void qcu_cudaEventRecord(VirtioQCArg *arg)
 
 	eventIdx  = arg->pA;
 	streamIdx = arg->pB;
-	cudaError((err = cudaEventRecord(cudaEvent[eventIdx], cudaStream[streamIdx])));
+
+	if(streamIdx == 0)
+		cudaError((err = cudaEventRecord(cudaEvent[eventIdx], cudaStream[cudaStreamDefaultNum])));
+	else
+		cudaError((err = cudaEventRecord(cudaEvent[eventIdx], cudaStream[streamIdx])));
+
 	arg->cmd = err;
 
 	ptrace("event record %u\n", eventIdx);

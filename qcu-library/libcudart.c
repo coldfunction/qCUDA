@@ -690,7 +690,7 @@ cudaError_t cudaEventRecord	(cudaEvent_t event,	cudaStream_t stream)
 
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
-	uint64_t mystream = (stream==NULL)?(uint64_t)-1:(uint64_t)stream;
+	uint64_t mystream = (uint64_t)stream;
 
 	ptr( arg.pA, event, 0);
 	//ptr( arg.pB, stream, 0);
