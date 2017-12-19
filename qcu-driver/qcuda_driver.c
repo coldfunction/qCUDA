@@ -357,6 +357,12 @@ void qcu_cudaRegisterFunction(VirtioQCArg *arg)
 	kfree_gpa(arg->pB, arg->pBSize);
 }
 
+void qcu_cudaRegisterVar(VirtioQCArg *arg)
+{
+	qcu_misc_send_cmd(arg);
+}
+
+
 void qcu_cudaLaunch(VirtioQCArg *arg)
 {	// pA: cuda kernel configuration
 	// pB: cuda kernel parameters
@@ -686,6 +692,13 @@ void qcu_cudaDeviceSynchronize(VirtioQCArg *arg)
 }
 
 void qcu_cudaDeviceReset(VirtioQCArg *arg)
+{
+	pfunc();
+
+	qcu_misc_send_cmd(arg);
+}
+
+void qcu_cudaDeviceSetLimit(VirtioQCArg *arg)
 {
 	pfunc();
 
@@ -1109,6 +1122,10 @@ static long qcu_misc_ioctl(struct file *filp, unsigned int _cmd, unsigned long _
 			qcu_cudaRegisterFunction(arg);
 			break;
 
+		case VIRTQC_cudaRegisterVar:	
+			qcu_cudaRegisterVar(arg);
+			break;
+
 		case VIRTQC_cudaLaunch:
 			qcu_cudaLaunch(arg);
 			break;
@@ -1158,6 +1175,10 @@ static long qcu_misc_ioctl(struct file *filp, unsigned int _cmd, unsigned long _
 		case VIRTQC_cudaDeviceReset:
 			qcu_cudaDeviceReset(arg);
 			break;
+
+		case VIRTQC_cudaDeviceSetLimit:
+			qcu_cudaDeviceSetLimit(arg);
+			break;			
 
 		//case VIRTQC_checkCudaCapabilities:
 		//	qcu_checkCudaCapabilities(arg);

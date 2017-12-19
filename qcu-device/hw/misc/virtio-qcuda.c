@@ -67,7 +67,7 @@ CUcontext cudaContext;
 
 int cudaContext_count;
 
-#define cudaFunctionMaxNum 8
+#define cudaFunctionMaxNum 512
 uint32_t cudaFunctionNum;
 
 #define cudaEventMaxNum 32
@@ -254,6 +254,12 @@ static void qcu_cudaRegisterFatBinary(VirtioQCArg *arg)
 
 }
 
+static void qcu_cudaRegisterVar(VirtioQCArg *arg)
+{
+	ptrace("call cudaRegisterVar\n");
+}
+
+
 static void qcu_cudaUnregisterFatBinary(VirtioQCArg *arg)
 {
 	uint32_t i;
@@ -298,7 +304,7 @@ static void qcu_cudaRegisterFunction(VirtioQCArg *arg)
 	memcpy(devicesKernels[cudaFunctionNum].functionName, functionName, arg->pBSize);
 	devicesKernels[cudaFunctionNum].funcId = funcId;
 
-	ptrace("fatBin= %16p ,name= '%s'\n", fatBin, functionName);
+	ptrace("fatBin= %16p ,name= '%s', cudaFunctionNum = %d\n", fatBin, functionName, cudaFunctionNum);
 
 
 	int i = totalDevices;
@@ -742,6 +748,20 @@ static void qcu_cudaDeviceReset(VirtioQCArg *arg)
 	memset( &cudaDevices[cudaDeviceCurrent[id]], 0, sizeof(cudaDev) );
 	arg->cmd = err;
 }
+
+static void qcu_cudaDeviceSetLimit(VirtioQCArg *arg)
+{
+	cudaError_t err;
+	int device;
+
+	pfunc();
+
+	cudaError(err = cudaDeviceSetLimit(arg->pA, arg->pB));
+
+	arg->cmd = err;
+
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 ///	Version Management
@@ -1266,6 +1286,10 @@ static void virtio_qcuda_cmd_handle(VirtIODevice *vdev, VirtQueue *vq)
 				qcu_cudaUnregisterFatBinary(arg); 
 				break;
 
+			case VIRTQC_cudaRegisterVar:	
+				qcu_cudaRegisterVar(arg);
+			break;
+
 			case VIRTQC_cudaRegisterFunction:
 				qcu_cudaRegisterFunction(arg);
 				break;
@@ -1319,6 +1343,11 @@ static void virtio_qcuda_cmd_handle(VirtIODevice *vdev, VirtQueue *vq)
 			case VIRTQC_cudaDeviceReset:
 				qcu_cudaDeviceReset(arg);
 				break;
+
+			case VIRTQC_cudaDeviceSetLimit:
+				qcu_cudaDeviceSetLimit(arg);
+			break;	
+
 
 			// Version Management (runtime API)
 			case VIRTQC_cudaDriverGetVersion:

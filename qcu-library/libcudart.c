@@ -301,6 +301,30 @@ void __cudaRegisterFunction(
 	time_end(t_RegFunc);
 }
 
+void __cudaRegisterVar(
+        void **fatCubinHandle,
+        char  *hostVar,
+        char  *deviceAddress,
+  const char  *deviceName,
+        int    ext,
+        int    size,
+        int    constant,
+        int    global
+)
+{
+	pfunc();
+
+    ptrace("fatCubinHandle= %p, value= %p\n", fatCubinHandle, *fatCubinHandle);
+	ptrace("hostVar= %s (%p)\n", hostVar, hostVar);
+	ptrace("deviceAddress= %s (%p)\n", deviceAddress, deviceAddress);
+	ptrace("deviceName= %s\n", deviceName);
+	ptrace("ext= %d, size = %d, constant = %d, global = %d\n", ext, size, constant, global);
+
+	VirtioQCArg arg;
+	send_cmd_to_device( VIRTQC_cudaRegisterVar, &arg);
+}
+
+
 cudaError_t cudaConfigureCall(
 		dim3 gridDim, 
 		dim3 blockDim, 
@@ -654,6 +678,23 @@ cudaError_t cudaDeviceReset(void)
 	time_end(t_DevReset);
 	return (cudaError_t)arg.cmd;
 }
+
+
+cudaError_t cudaDeviceSetLimit	(enum cudaLimit limit, size_t value )	
+{
+	VirtioQCArg arg;
+	pfunc();
+
+	memset(&arg, 0, sizeof(VirtioQCArg));
+
+	ptr( arg.pA, limit, 0);
+	ptr( arg.pB, value, 0);
+
+	send_cmd_to_device( VIRTQC_cudaDeviceSetLimit, &arg);
+
+	return (cudaError_t)arg.cmd;
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Version Management
