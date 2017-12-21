@@ -3,3 +3,4 @@ sftp-config.json
 *.ko
 *.[oa]
 qcu-device/tags
+cscope.*
