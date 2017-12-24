@@ -63,13 +63,7 @@ these three components are defined as follows:
 
 In our current version, qCUDA has been implementing for 32 CUDA runtime APIs. These implemented CUDA runtime APIs on qCUDA are shown in the table as below:
 
-<style type="text/css">
-.tg  {border-collapse:collapse;border-spacing:0;border-color:#ccc;}
-.tg td{font-family:Arial, sans-serif;font-size:14px;padding:10px 5px;border-style:solid;border-width:0px;overflow:hidden;word-break:normal;border-color:#ccc;color:#333;background-color:#fff;border-top-width:1px;border-bottom-width:1px;}
-.tg th{font-family:Arial, sans-serif;font-size:14px;font-weight:normal;padding:10px 5px;border-style:solid;border-width:0px;overflow:hidden;word-break:normal;border-color:#ccc;color:#333;background-color:#f0f0f0;border-top-width:1px;border-bottom-width:1px;}
-.tg .tg-yw4l{vertical-align:top}
-.tg .tg-3we0{background-color:#ffffff;vertical-align:top}
-</style>
+
 <table class="tg">
   <tr>
     <th class="tg-yw4l">Classification</th>
