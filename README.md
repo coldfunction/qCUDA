@@ -58,6 +58,13 @@ these three components are defined as follows:
     * make all
     * make install
 
+## A CUDA sample in guest OS 
+In the guest OS, *nvcc* compiles the source with host/device code and standard CUDA runtime APIs. To compare with a native OS, in the guest VM, compiling the CUDA program must add the nvcc flag "**-cudart=shared**", which can be dynamically linked to the qCUlibrary as a shared library. Therefore, the qCUlibrary provided the wrapper functions that intercepted dynamic memory allocation of CPU code and CUDA runtime APIs. For instance, you can find the cdpSimpleQuicksort of the CUDA simples in the [NVIDIA CUDA SDK](http://developer.download.nvidia.com/compute/cuda/7.5/Prod/local_installers/cuda_7.5.18_linux.run), after installing qCUdriver and qCUlibrary in the guest OS, go to the cdpSimpleQuicksort and modify the internal flags in the Makefile as below:
+```shell
+# internal flags
+NVCCFLAGS   := -m${TARGET_SIZE} -cudart=shared      
+```
+Finally, run make and perform the executable file without change any source code.
 
 ## How to use qCUDA framework
 
