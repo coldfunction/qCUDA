@@ -386,5 +386,7 @@ According to the above sample, we know that through the qCUDA framwork, programm
 
 ## Contributors
 * Yu-Shiang Lin
+* Jordan Huang
 * Luis Herrera
 * Jia-Chi Chen
+
