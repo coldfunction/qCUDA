@@ -41,7 +41,7 @@
 	p##Size = (uint32_t)s;
 
 int fd = -1;
-unsigned int map_offset = 0;
+uint64_t map_offset = 0;
 
 extern void *__libc_malloc(size_t);
 extern void __libc_free(void*);
@@ -53,6 +53,16 @@ uint64_t cudaKernelConf[8];
 uint8_t cudaKernelPara[ cudaKernelParaMaxSize ];
 uint32_t cudaParaSize;
 
+/*
+struct mmap_record{
+	uint64_t ptr;
+	uint64_t size;
+};
+struct mmap_record mmapRecord[100];
+
+int alloc_head = 0;
+int free_head  = 0;
+*/
 
 ////////////////////////////////////////////////////////////////////////////////
 /// General Function
@@ -92,11 +102,16 @@ void *__zcmalloc(uint64_t size)
 	if(size%blocksize != 0) numOfblocks++;
 
 	void *addr = mmap(0, numOfblocks*blocksize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, map_offset);
-		
+	
 	msync(addr, numOfblocks*blocksize, MS_ASYNC);
 	
 	map_offset+=numOfblocks*blocksize;
-	
+
+/*
+	mmapRecord[alloc_head].ptr  = (uint64_t)addr;
+	mmapRecord[alloc_head].size = numOfblocks*blocksize;
+	alloc_head = (alloc_head+1)%100;
+*/
 	time_end(t_myMalloc);
 	
 	return addr;
@@ -119,6 +134,33 @@ void free(void* ptr)
 	VirtioQCArg arg;
 	ptr(arg.pA, ptr, 0);
 	send_cmd_to_device(VIRTQC_CMD_MMAPRELEASE, &arg);
+/*
+	int i;
+	for(i = free_head; i < alloc_head; i++)
+	{
+		if (mmapRecord[i].ptr == (uint64_t)ptr)
+		{
+			uint64_t tmp1 = mmapRecord[free_head].ptr;
+			uint64_t tmp2 = mmapRecord[free_head].size;
+			mmapRecord[free_head].ptr = mmapRecord[i].ptr;
+			mmapRecord[free_head].size = mmapRecord[i].size;
+			mmapRecord[i].ptr = tmp1;
+			mmapRecord[i].size = tmp2;
+			break;
+		}
+	}
+	if ( munmap(ptr, mmapRecord[free_head].size) == 0)
+	{
+		printf("cocotion test free mem okokok\n");
+	}
+	else 
+	{
+		printf("cocotion test free mem fail\n");	
+	}
+
+	free_head = (free_head+1)%100;
+*/
+
 
 #ifdef USER_KERNEL_COPY		
 	if((int)arg.cmd == -1)
@@ -258,6 +300,30 @@ void __cudaRegisterFunction(
 	send_cmd_to_device( VIRTQC_cudaRegisterFunction, &arg);
 	time_end(t_RegFunc);
 }
+
+void __cudaRegisterVar(
+        void **fatCubinHandle,
+        char  *hostVar,
+        char  *deviceAddress,
+  const char  *deviceName,
+        int    ext,
+        int    size,
+        int    constant,
+        int    global
+)
+{
+	pfunc();
+
+    ptrace("fatCubinHandle= %p, value= %p\n", fatCubinHandle, *fatCubinHandle);
+	ptrace("hostVar= %s (%p)\n", hostVar, hostVar);
+	ptrace("deviceAddress= %s (%p)\n", deviceAddress, deviceAddress);
+	ptrace("deviceName= %s\n", deviceName);
+	ptrace("ext= %d, size = %d, constant = %d, global = %d\n", ext, size, constant, global);
+
+	VirtioQCArg arg;
+	send_cmd_to_device( VIRTQC_cudaRegisterVar, &arg);
+}
+
 
 cudaError_t cudaConfigureCall(
 		dim3 gridDim, 
@@ -612,6 +678,23 @@ cudaError_t cudaDeviceReset(void)
 	time_end(t_DevReset);
 	return (cudaError_t)arg.cmd;
 }
+
+
+cudaError_t cudaDeviceSetLimit	(enum cudaLimit limit, size_t value )	
+{
+	VirtioQCArg arg;
+	pfunc();
+
+	memset(&arg, 0, sizeof(VirtioQCArg));
+
+	ptr( arg.pA, limit, 0);
+	ptr( arg.pB, value, 0);
+
+	send_cmd_to_device( VIRTQC_cudaDeviceSetLimit, &arg);
+
+	return (cudaError_t)arg.cmd;
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Version Management

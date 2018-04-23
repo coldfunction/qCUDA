@@ -36,6 +36,7 @@ enum
 	VIRTQC_cudaRegisterFatBinary = 200,
 	VIRTQC_cudaUnregisterFatBinary,
 	VIRTQC_cudaRegisterFunction,
+	VIRTQC_cudaRegisterVar,
 	VIRTQC_cudaLaunch,
 
 	// Memory Management (runtime API)
@@ -52,6 +53,7 @@ enum
 	VIRTQC_cudaSetDevice,
 	VIRTQC_cudaDeviceSynchronize,
 	VIRTQC_cudaDeviceReset,
+	VIRTQC_cudaDeviceSetLimit,
 
 	// Version Management (runtime API)
 	VIRTQC_cudaDriverGetVersion,
