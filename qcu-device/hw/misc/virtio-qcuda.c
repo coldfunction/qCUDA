@@ -16,13 +16,13 @@
 //#define AUTO_ASSIGN_GPU_ENABLE
 
 
-#if 0
+#if 1
 #define pfunc() printf("### %s at line %d\n", __func__, __LINE__)
 #else
 #define pfunc()
 #endif
 
-#if 0
+#if 1
 #define ptrace(fmt, arg...) \
 	printf("    " fmt, ##arg)
 #else
@@ -906,6 +906,8 @@ static void qcu_cudaHostRegister(VirtioQCArg *arg)
 	{
     	ptr = gpa_to_hva(gpa_array[i]);
 		err = cudaHostRegister(ptr, MIN(BLOCK_SIZE,size), arg->flag);
+        ptrace("ptr: %x, size: %d, flag: %d", ptr, MIN(BLOCK_SIZE,size), arg->flag); 
+        ptrace("error is: %d\n", err);
 		size-=BLOCK_SIZE;	
 	}
 	arg->cmd = err;
