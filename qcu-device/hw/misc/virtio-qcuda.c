@@ -373,6 +373,19 @@ static void qcu_cudaLaunch(VirtioQCArg *arg)
 	free(paraBuf);
 }
 
+static void qcu_cudaFuncGetAttributes(VirtioQCArg *arg) 
+{
+	cudaError_t err;
+	struct cudaFuncAttributes *attr;
+	void *func;
+
+	attr = gpa_to_hva(arg->pA);
+	func = gpa_to_hva(arg->pB);
+
+	cudaError((err = cudaFuncGetAttributes(attr, func)));
+	arg->cmd = err;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 /// Memory Management (runtime API)
 ////////////////////////////////////////////////////////////////////////////////
@@ -1298,6 +1311,10 @@ static void virtio_qcuda_cmd_handle(VirtIODevice *vdev, VirtQueue *vq)
 
 			case VIRTQC_cudaLaunch:
 				qcu_cudaLaunch(arg);
+				break;
+
+			case VIRTQC_cudaFuncGetAttributes:
+				qcu_cudaFuncGetAttributes(arg);
 				break;
 
 			// Memory Management (runtime API)

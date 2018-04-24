@@ -410,6 +410,18 @@ cudaError_t cudaLaunch(const void *func)
 	return cudaSuccess;
 }
 
+cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes *attr, const void *func)
+{
+	VirtioQCArg arg;
+	memset(&arg, 0, sizeof(VirtioQCArg));
+
+	ptr( arg.pA, attr, sizeof(struct cudaFuncAttributes));
+	ptr( arg.pB, func, sizeof(func));	
+
+	send_cmd_to_device( VIRTQC_cudaFuncGetAttributes, &arg);
+	return (cudaError_t)arg.cmd;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 /// Memory Management
 ////////////////////////////////////////////////////////////////////////////////
@@ -998,13 +1010,10 @@ cudaError_t cudaThreadSynchronize()
 }
 
 
-cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes *attr, const void *func)
-{
-	VirtioQCArg arg;
-	memset(&arg, 0, sizeof(VirtioQCArg));
-	send_cmd_to_device( VIRTQC_cudaFuncGetAttributes, &arg);
-	return (cudaError_t)arg.cmd;
-}
+//new function 
+
+
+
 
 cudaError_t cudaDeviceGetAttribute(int * value, enum cudaDeviceAttr attr, int device)
 {

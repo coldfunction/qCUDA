@@ -377,6 +377,21 @@ void qcu_cudaLaunch(VirtioQCArg *arg)
 	kfree_gpa(arg->pB, arg->pBSize);
 }
 
+void qcu_cudaFuncGetAttributes(VirtioQCArg *arg)
+{
+	void *prop;
+	prop = (void*)arg->pA;
+	arg->pA = user_to_gpa( 0, arg->pASize);	
+	arg->pB = user_to_gpa(arg->pB, arg->pBSize);
+
+	qcu_misc_send_cmd(arg);
+
+
+	gpa_to_user(prop, arg->pA, arg->pASize);	
+	kfree_gpa(arg->pA, arg->pASize);
+}
+
+
 ////////////////////////////////////////////////////////////////////////////////
 ///	Memory Management
 ////////////////////////////////////////////////////////////////////////////////
@@ -1128,6 +1143,10 @@ static long qcu_misc_ioctl(struct file *filp, unsigned int _cmd, unsigned long _
 
 		case VIRTQC_cudaLaunch:
 			qcu_cudaLaunch(arg);
+			break;
+
+		case VIRTQC_cudaFuncGetAttributes:
+			qcu_cudaFuncGetAttributes(arg);
 			break;
 
 		// Memory Management (runtime API)
