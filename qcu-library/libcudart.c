@@ -14,18 +14,19 @@
 
 #include <builtin_types.h>
 #include <__cudaFatFormat.h>
+#include <driver_types.h>
 #include <fatBinaryCtl.h>
 
 #include "time_measure.h"
 #include "../qcu-driver/qcuda_common.h"
 
-#if 0
+#if 1
 #define pfunc() printf("### %s at line %d\n", __func__, __LINE__)
 #else
 #define pfunc()
 #endif
 
-#if 0
+#if 1
 #define ptrace(fmt, arg...) \
 	printf("    " fmt, ##arg)
 #else
@@ -997,5 +998,43 @@ cudaError_t cudaThreadSynchronize()
 }
 
 
+cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes *attr, const void *func)
+{
+	VirtioQCArg arg;
+	memset(&arg, 0, sizeof(VirtioQCArg));
+	send_cmd_to_device( VIRTQC_cudaFuncGetAttributes, &arg);
+	return (cudaError_t)arg.cmd;
+}
 
+cudaError_t cudaDeviceGetAttribute(int * value, enum cudaDeviceAttr attr, int device)
+{
+	VirtioQCArg arg;
+	memset(&arg, 0, sizeof(VirtioQCArg));
+    send_cmd_to_device(VIRTQC_cudaDeviceGetAttributes, &arg);
+    return (cudaError_t)arg.cmd;
+
+}
+cudaError_t cudaStreamWaitEvent(cudaStream_t stream, cudaEvent_t event, unsigned int flags)
+{
+    return 0;
+}
+
+cudaError_t cudaDeviceSetCacheConfig(enum cudaFuncCache cacheConfig)
+{
+	VirtioQCArg arg;
+	memset(&arg, 0, sizeof(VirtioQCArg));
+	send_cmd_to_device( VIRTQC_cudaDeviceSetCacheConfig, &arg);
+	return (cudaError_t)arg.cmd;
+}
+cudaError_t cudaPeekAtLastError(void)
+{
+	VirtioQCArg arg;
+	pfunc();
+
+	memset(&arg, 0, sizeof(VirtioQCArg));
+
+	send_cmd_to_device(VIRTQC_cudaPeekAtLastError, &arg);
+
+	return (cudaError_t)arg.cmd;
+}
 

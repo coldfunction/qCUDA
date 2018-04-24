@@ -38,6 +38,7 @@ enum
 	VIRTQC_cudaRegisterFunction,
 	VIRTQC_cudaRegisterVar,
 	VIRTQC_cudaLaunch,
+    VIRTQC_cudaFuncGetAttributes,
 
 	// Memory Management (runtime API)
 	VIRTQC_cudaMalloc,
@@ -49,11 +50,13 @@ enum
 	// Device Management (runtime API)
 	VIRTQC_cudaGetDevice,
 	VIRTQC_cudaGetDeviceCount,
+    VIRTQC_cudaDeviceGetAttributes,
 	VIRTQC_cudaGetDeviceProperties,
 	VIRTQC_cudaSetDevice,
 	VIRTQC_cudaDeviceSynchronize,
 	VIRTQC_cudaDeviceReset,
 	VIRTQC_cudaDeviceSetLimit,
+    VIRTQC_cudaDeviceSetCacheConfig,
 
 	// Version Management (runtime API)
 	VIRTQC_cudaDriverGetVersion,
@@ -69,6 +72,7 @@ enum
 
 	// Error Handling (runtime API)
 	VIRTQC_cudaGetLastError,
+    VIRTQC_cudaPeekAtLastError,
 
 	//zero-cpy
 	VIRTQC_cudaHostRegister,
@@ -81,6 +85,7 @@ enum
 	VIRTQC_cudaStreamCreate,
 	VIRTQC_cudaStreamDestroy,
 	VIRTQC_cudaStreamSynchronize,
+    VIRTQC_cudaStreamWaitEvent,
 
 	// Thread Management
 	VIRTQC_cudaThreadSynchronize,
