@@ -709,6 +709,23 @@ cudaError_t cudaDeviceSetLimit	(enum cudaLimit limit, size_t value )
 }
 
 
+cudaError_t cudaDeviceGetAttribute(int * value, enum cudaDeviceAttr attr, int device)
+{
+	VirtioQCArg arg;
+	memset(&arg, 0, sizeof(VirtioQCArg));
+
+	//ptr( arg.pA, value, 0);
+	ptr( arg.pB, attr, device);
+
+    send_cmd_to_device(VIRTQC_cudaDeviceGetAttribute, &arg);
+    *value = (int)arg.pA;
+
+    return (cudaError_t)arg.cmd;
+
+}
+
+
+
 ////////////////////////////////////////////////////////////////////////////////
 /// Version Management
 ////////////////////////////////////////////////////////////////////////////////
@@ -1015,14 +1032,6 @@ cudaError_t cudaThreadSynchronize()
 
 
 
-cudaError_t cudaDeviceGetAttribute(int * value, enum cudaDeviceAttr attr, int device)
-{
-	VirtioQCArg arg;
-	memset(&arg, 0, sizeof(VirtioQCArg));
-    send_cmd_to_device(VIRTQC_cudaDeviceGetAttributes, &arg);
-    return (cudaError_t)arg.cmd;
-
-}
 cudaError_t cudaStreamWaitEvent(cudaStream_t stream, cudaEvent_t event, unsigned int flags)
 {
     return 0;

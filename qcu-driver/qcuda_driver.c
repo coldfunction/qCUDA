@@ -720,6 +720,11 @@ void qcu_cudaDeviceSetLimit(VirtioQCArg *arg)
 	qcu_misc_send_cmd(arg);
 }
 
+void qcu_cudaDeviceGetAttribute(VirtioQCArg *arg)
+{
+	qcu_misc_send_cmd(arg);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 ///	Version Management
 ////////////////////////////////////////////////////////////////////////////////
@@ -1197,6 +1202,10 @@ static long qcu_misc_ioctl(struct file *filp, unsigned int _cmd, unsigned long _
 
 		case VIRTQC_cudaDeviceSetLimit:
 			qcu_cudaDeviceSetLimit(arg);
+			break;			
+
+		case VIRTQC_cudaDeviceGetAttribute:
+			qcu_cudaDeviceGetAttribute(arg);
 			break;			
 
 		//case VIRTQC_checkCudaCapabilities:

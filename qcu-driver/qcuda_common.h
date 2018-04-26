@@ -50,7 +50,7 @@ enum
 	// Device Management (runtime API)
 	VIRTQC_cudaGetDevice,
 	VIRTQC_cudaGetDeviceCount,
-    VIRTQC_cudaDeviceGetAttributes,
+    VIRTQC_cudaDeviceGetAttribute,
 	VIRTQC_cudaGetDeviceProperties,
 	VIRTQC_cudaSetDevice,
 	VIRTQC_cudaDeviceSynchronize,

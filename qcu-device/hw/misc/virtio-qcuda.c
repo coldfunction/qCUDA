@@ -775,6 +775,18 @@ static void qcu_cudaDeviceSetLimit(VirtioQCArg *arg)
 
 }
 
+void qcu_cudaDeviceGetAttribute(VirtioQCArg *arg)
+{
+	cudaError_t err;
+
+	int value;
+	cudaError((err = cudaDeviceGetAttribute(&value, arg->pB, arg->pBSize)));
+
+	arg->pA  = value;
+	arg->cmd = err;
+}
+
+
 
 ////////////////////////////////////////////////////////////////////////////////
 ///	Version Management
@@ -1367,6 +1379,9 @@ static void virtio_qcuda_cmd_handle(VirtIODevice *vdev, VirtQueue *vq)
 				qcu_cudaDeviceSetLimit(arg);
 			break;	
 
+			case VIRTQC_cudaDeviceGetAttribute:
+				qcu_cudaDeviceGetAttribute(arg);
+			break;		
 
 			// Version Management (runtime API)
 			case VIRTQC_cudaDriverGetVersion:
