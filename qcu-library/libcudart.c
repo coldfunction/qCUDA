@@ -814,6 +814,25 @@ cudaError_t cudaEventRecord	(cudaEvent_t event,	cudaStream_t stream)
 	return (cudaError_t)arg.cmd;
 }
 
+
+cudaError_t cudaStreamWaitEvent(cudaStream_t stream, cudaEvent_t event, unsigned int flags)
+{
+	VirtioQCArg arg;
+	pfunc();
+
+	memset(&arg, 0, sizeof(VirtioQCArg));
+
+	uint64_t mystream = (stream==NULL)?(uint64_t)-1:(uint64_t)stream;
+
+	ptr( arg.pA, event, 0);
+	ptr( arg.pB, mystream, flags);
+	send_cmd_to_device( VIRTQC_cudaStreamWaitEvent, &arg);
+
+	return (cudaError_t)arg.cmd;
+}
+
+
+
 cudaError_t cudaEventSynchronize(cudaEvent_t event)
 {
 	VirtioQCArg arg;
@@ -1031,11 +1050,6 @@ cudaError_t cudaThreadSynchronize()
 
 
 
-
-cudaError_t cudaStreamWaitEvent(cudaStream_t stream, cudaEvent_t event, unsigned int flags)
-{
-    return 0;
-}
 
 cudaError_t cudaDeviceSetCacheConfig(enum cudaFuncCache cacheConfig)
 {

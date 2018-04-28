@@ -882,6 +882,28 @@ static void qcu_cudaEventRecord(VirtioQCArg *arg)
 	ptrace("event record %u\n", eventIdx);
 }
 
+static void qcu_cudaStreamWaitEvent(VirtioQCArg *arg)
+{
+
+	cudaError_t err;
+	uint32_t eventIdx;
+	uint64_t streamIdx;
+	pfunc();
+
+	eventIdx  		  = arg->pA;
+	streamIdx 		  = arg->pB;
+	unsigned int flag = arg->pBSize;
+
+	if(streamIdx == (uint64_t)-1)
+         cudaError((err = cudaStreamWaitEvent(NULL, cudaEvent[eventIdx], flag)));
+     else
+         cudaError((err = cudaStreamWaitEvent(cudaStream[streamIdx], cudaEvent[eventIdx], flag)));
+
+
+	arg->cmd = err;
+
+}
+
 static void qcu_cudaEventSynchronize(VirtioQCArg *arg)
 {
 	cudaError_t err;
@@ -1420,6 +1442,10 @@ static void virtio_qcuda_cmd_handle(VirtIODevice *vdev, VirtQueue *vq)
 
 			case VIRTQC_cudaEventRecord:
 				qcu_cudaEventRecord(arg);
+				break;
+
+			case VIRTQC_cudaStreamWaitEvent:
+				qcu_cudaStreamWaitEvent(arg);
 				break;
 
 			case VIRTQC_cudaEventSynchronize:

@@ -766,6 +766,13 @@ void qcu_cudaEventRecord(VirtioQCArg *arg)
 	qcu_misc_send_cmd(arg);
 }
 
+void qcu_cudaStreamWaitEvent(VirtioQCArg *arg)
+{
+	pfunc();
+
+	qcu_misc_send_cmd(arg);
+}
+
 void qcu_cudaEventSynchronize(VirtioQCArg *arg)
 {
 	pfunc();
@@ -1232,6 +1239,10 @@ static long qcu_misc_ioctl(struct file *filp, unsigned int _cmd, unsigned long _
 
 		case VIRTQC_cudaEventRecord:
 			qcu_cudaEventRecord(arg);
+			break;
+
+		case VIRTQC_cudaStreamWaitEvent:
+			qcu_cudaStreamWaitEvent(arg);
 			break;
 
 		case VIRTQC_cudaEventSynchronize:
