@@ -684,6 +684,15 @@ void qcu_cudaSetDevice(VirtioQCArg *arg)
 	qcu_misc_send_cmd(arg);
 }
 
+void qcu_cudaDeviceSetCacheConfig(VirtioQCArg *arg)
+{
+	pfunc();
+
+	qcu_misc_send_cmd(arg);
+}
+
+
+
 void qcu_cudaGetDeviceProperties(VirtioQCArg *arg)
 {
 	void* prop;
@@ -1060,9 +1069,7 @@ void qcu_cudaHostUnregister(VirtioQCArg *arg, struct virtio_qc_mmap *priv)
 
 void qcu_cudaSetDeviceFlags(VirtioQCArg *arg)
 {
-	ptrace("cocotion qcu_cudaSetDeviceFlags start ok\n");
 	qcu_misc_send_cmd(arg);
-	ptrace("cocotion qcu_cudaSetDeviceFlags end ok\n");
 }
 
 void qcu_cudaFreeHost(VirtioQCArg *arg, struct virtio_qc_mmap *priv)
@@ -1195,6 +1202,10 @@ static long qcu_misc_ioctl(struct file *filp, unsigned int _cmd, unsigned long _
 			qcu_cudaSetDevice(arg);
 			break;
 
+		case VIRTQC_cudaDeviceSetCacheConfig:
+			qcu_cudaDeviceSetCacheConfig(arg);
+			break;
+
 		case VIRTQC_cudaGetDeviceProperties:
 			qcu_cudaGetDeviceProperties(arg);
 			break;
@@ -1304,7 +1315,6 @@ static long qcu_misc_ioctl(struct file *filp, unsigned int _cmd, unsigned long _
 
 		default:
 			error("unknow cmd= %d\n", arg->cmd);
-			break;
 	}
 
 	copy_to_user_safe((void*)_arg, arg, sizeof(VirtioQCArg));

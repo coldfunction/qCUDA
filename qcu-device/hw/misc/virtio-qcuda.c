@@ -712,13 +712,28 @@ static void qcu_cudaSetDevice(VirtioQCArg *arg)
 
 	cudaError((err = initializeDevice(id)));
 
-
-
-
 	arg->cmd = err;
 
 	ptrace("set device= %d\n", device);
 }
+
+static void qcu_cudaDeviceSetCacheConfig(VirtioQCArg *arg)
+{
+
+	cudaError_t err;
+	int device;
+
+	pfunc();
+
+	device = (int)arg->pA;
+
+	cudaError((err = cudaDeviceSetCacheConfig(device)));
+
+	arg->cmd = err;
+
+}
+
+
 
 static void qcu_cudaGetDeviceProperties(VirtioQCArg *arg)
 {
@@ -1385,6 +1400,10 @@ static void virtio_qcuda_cmd_handle(VirtIODevice *vdev, VirtQueue *vq)
 				qcu_cudaSetDevice(arg);
 				break;
 
+			case VIRTQC_cudaDeviceSetCacheConfig:
+				qcu_cudaDeviceSetCacheConfig(arg);	
+				break;
+
 			case VIRTQC_cudaGetDeviceProperties:
 				qcu_cudaGetDeviceProperties(arg);
 				break;
@@ -1399,11 +1418,11 @@ static void virtio_qcuda_cmd_handle(VirtIODevice *vdev, VirtQueue *vq)
 
 			case VIRTQC_cudaDeviceSetLimit:
 				qcu_cudaDeviceSetLimit(arg);
-			break;	
+				break;	
 
 			case VIRTQC_cudaDeviceGetAttribute:
 				qcu_cudaDeviceGetAttribute(arg);
-			break;		
+				break;		
 
 			// Version Management (runtime API)
 			case VIRTQC_cudaDriverGetVersion:

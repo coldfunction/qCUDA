@@ -646,6 +646,19 @@ cudaError_t cudaSetDevice(int device)
 	return (cudaError_t)arg.cmd;
 }
 
+
+cudaError_t cudaDeviceSetCacheConfig(enum cudaFuncCache cacheConfig)
+{
+	VirtioQCArg arg;
+	memset(&arg, 0, sizeof(VirtioQCArg));
+
+	ptr( arg.pA, cacheConfig, 0);
+
+	send_cmd_to_device( VIRTQC_cudaDeviceSetCacheConfig, &arg);
+	return (cudaError_t)arg.cmd;
+}
+
+
 cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device)
 {
 	VirtioQCArg arg;
@@ -1050,14 +1063,6 @@ cudaError_t cudaThreadSynchronize()
 
 
 
-
-cudaError_t cudaDeviceSetCacheConfig(enum cudaFuncCache cacheConfig)
-{
-	VirtioQCArg arg;
-	memset(&arg, 0, sizeof(VirtioQCArg));
-	send_cmd_to_device( VIRTQC_cudaDeviceSetCacheConfig, &arg);
-	return (cudaError_t)arg.cmd;
-}
 cudaError_t cudaPeekAtLastError(void)
 {
 	VirtioQCArg arg;
