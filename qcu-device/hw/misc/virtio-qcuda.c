@@ -977,6 +977,16 @@ static void qcu_cudaGetLastError(VirtioQCArg *arg)
 	ptrace("lasr cudaError %d\n", err);
 }
 
+static void qcu_cudaPeekAtLastError(VirtioQCArg *arg)
+{
+	cudaError_t err;
+	pfunc();
+
+	err =  cudaGetLastError();
+	arg->cmd = err;
+}
+
+
 //////////zero-copy////////
 
 static void qcu_cudaHostRegister(VirtioQCArg *arg)
@@ -1483,6 +1493,10 @@ static void virtio_qcuda_cmd_handle(VirtIODevice *vdev, VirtQueue *vq)
 			case VIRTQC_cudaGetLastError:
 				qcu_cudaGetLastError(arg);
 				break;
+
+			case VIRTQC_cudaPeekAtLastError:
+				qcu_cudaPeekAtLastError(arg);
+			break;
 
 			//zero-copy
 			case VIRTQC_cudaHostRegister:

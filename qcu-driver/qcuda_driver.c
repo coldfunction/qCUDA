@@ -814,6 +814,13 @@ void qcu_cudaGetLastError(VirtioQCArg *arg)
 	qcu_misc_send_cmd(arg);
 }
 
+void qcu_cudaPeekAtLastError(VirtioQCArg *arg)
+{
+	pfunc();
+
+	qcu_misc_send_cmd(arg);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 /// Thread Management
 ////////////////////////////////////////////////////////////////////////////////
@@ -1271,6 +1278,10 @@ static long qcu_misc_ioctl(struct file *filp, unsigned int _cmd, unsigned long _
 		// Error Handling (runtime API)
 		case VIRTQC_cudaGetLastError:
 			qcu_cudaGetLastError(arg);
+			break;
+
+		case VIRTQC_cudaPeekAtLastError:
+			qcu_cudaPeekAtLastError(arg);
 			break;
 
 		//Zero-copy

@@ -928,6 +928,18 @@ const char* cudaGetErrorString(cudaError_t 	error)
 	return "Not yet implement";
 }
 
+cudaError_t cudaPeekAtLastError(void)
+{
+	VirtioQCArg arg;
+	pfunc();
+
+	memset(&arg, 0, sizeof(VirtioQCArg));
+
+	send_cmd_to_device(VIRTQC_cudaPeekAtLastError, &arg);
+
+	return (cudaError_t)arg.cmd;
+}
+
 ////////about zero-copy
 
 cudaError_t cudaHostRegister(void *ptr, size_t size, unsigned int flags)
@@ -1055,23 +1067,6 @@ cudaError_t cudaThreadSynchronize()
 	memset(&arg, 0, sizeof(VirtioQCArg));
 
 	send_cmd_to_device( VIRTQC_cudaThreadSynchronize, &arg);
-	return (cudaError_t)arg.cmd;
-}
-
-
-//new function 
-
-
-
-cudaError_t cudaPeekAtLastError(void)
-{
-	VirtioQCArg arg;
-	pfunc();
-
-	memset(&arg, 0, sizeof(VirtioQCArg));
-
-	send_cmd_to_device(VIRTQC_cudaPeekAtLastError, &arg);
-
 	return (cudaError_t)arg.cmd;
 }
 
