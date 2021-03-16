@@ -33,6 +33,17 @@ defer continue-client
 : get-chosen ( name len -- [ prop len ] success )
   chosen get-property 0= ;
 
+\ Do not assume that cpu0 is available
+VARIABLE chosen-cpu-ihandle
+: set-chosen-cpu ( -- )
+    s" /cpus" find-node  dup 0= ABORT" /cpus not found"
+    child                dup 0= ABORT" /cpus/cpu not found"
+    0 0 rot open-node
+    dup chosen-cpu-ihandle !  encode-int s" cpu" set-chosen
+;
+
+: chosen-cpu-unit ( -- ret ) chosen-cpu-ihandle @ ihandle>phandle >unit ;
+
 \ Look for an exising root, create one if needed
 " /" find-node dup 0= IF
     drop
@@ -57,6 +68,8 @@ THEN
 \ Create /aliases
 new-device
     s" aliases" device-name
+   : open  true ;
+   : close ;
 finish-device
 
 \ Create /options
@@ -77,7 +90,6 @@ finish-device
 
 : open true ;
 : close ;
-#include <archsupport.fs>
 
 \ Finish root
 finish-device

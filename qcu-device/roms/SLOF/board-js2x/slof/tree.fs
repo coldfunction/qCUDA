@@ -140,6 +140,13 @@ set-node
 
 #include "ht.fs"
 
+6a0 cp
+get-node device-end
+\ At this point the SAS controller has been detected and we know if it
+\ is a bimini or js21. If it is bimini the fcode evaluator is included
+bimini? ?include evaluator.fs
+set-node
+
 6b0 cp
 
 u4? ?include attu.fs
@@ -207,11 +214,6 @@ s" /openprom" find-device
       read-version-and-date  s" ibm,fw-temp-bank" property
       flashside? set-flashside drop
    THEN
-device-end
-
-s" /aliases" find-device
-   : open  true ;
-   : close ;
 device-end
 
 s" /mmu" open-dev encode-int s" mmu" set-chosen

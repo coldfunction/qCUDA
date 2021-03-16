@@ -7,7 +7,7 @@
  *  This program is part of a free implementation of the IEEE 1275-1994 
  *  Standard for Boot (Initialization Configuration) Firmware.
  *
- *  Copyright (C) 1998-2004  Stefan Reinauer, <stepan@openbios.org>
+ *  Copyright (C) 1998-2004  Stefan Reinauer
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -219,7 +219,7 @@ static ssize_t bios_write(struct file *file, const char *buffer, size_t count, l
 
 	    if (flash_ready_poll(addr,offset+writeoffs+flashchips[fn].pagesize-1,
 				 clipboard[writeoffs+flashchips[fn].pagesize-1])) {
-	      printk (KERN_ERR "BIOS: Error occured, please repeat write operation.\n");
+	      printk (KERN_ERR "BIOS: Error occurred, please repeat write operation.\n");
 	    }
 	    flash_command(addr, 0xf0);
 	    

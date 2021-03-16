@@ -649,7 +649,7 @@ struct net80211_device_operations rtl818x_operations = {
 	.config = rtl818x_config,
 };
 
-static int rtl818x_probe(struct pci_device *pdev )
+int rtl818x_probe(struct pci_device *pdev )
 {
 	struct net80211_device *dev;
 	struct rtl818x_priv *priv;
@@ -663,7 +663,8 @@ static int rtl818x_probe(struct pci_device *pdev )
 	hwinfo = zalloc(sizeof(*hwinfo));
 	if (!hwinfo) {
 		DBG("rtl818x: hwinfo alloc failed\n");
-		return -ENOMEM;
+		err = -ENOMEM;
+		goto err_alloc_hwinfo;
 	}
 
 	adjust_pci_device(pdev);
@@ -671,7 +672,8 @@ static int rtl818x_probe(struct pci_device *pdev )
 	dev = net80211_alloc(sizeof(*priv));
 	if (!dev) {
 		DBG("rtl818x: net80211 alloc failed\n");
-		return -ENOMEM;
+		err = -ENOMEM;
+		goto err_alloc_dev;
 	}
 
 	priv = dev->priv;
@@ -816,11 +818,13 @@ static int rtl818x_probe(struct pci_device *pdev )
  err_free_dev:
 	pci_set_drvdata(pdev, NULL);
 	net80211_free(dev);
+ err_alloc_dev:
 	free(hwinfo);
+ err_alloc_hwinfo:
 	return err;
 }
 
-static void rtl818x_remove(struct pci_device *pdev)
+void rtl818x_remove(struct pci_device *pdev)
 {
 	struct net80211_device *dev = pci_get_drvdata(pdev);
 
@@ -830,25 +834,3 @@ static void rtl818x_remove(struct pci_device *pdev)
 	net80211_unregister(dev);
 	net80211_free(dev);
 }
-
-/* Hide PCI_ROM definitions in here from parserom.pl; the definitions
-   that should be used are in rtl8180.c and rtl8185.c. */
-#define RTL_ROM PCI_ROM
-
-static struct pci_device_id rtl818x_nics[] = {
-	RTL_ROM(0x10ec, 0x8185, "rtl8185", "Realtek 8185", 0),
-	RTL_ROM(0x1799, 0x700f, "f5d7000", "Belkin F5D7000", 0),
-	RTL_ROM(0x1799, 0x701f, "f5d7010", "Belkin F5D7010", 0),
-
-	RTL_ROM(0x10ec, 0x8180, "rtl8180", "Realtek 8180", 0),
-	RTL_ROM(0x1799, 0x6001, "f5d6001", "Belkin F5D6001", 0),
-	RTL_ROM(0x1799, 0x6020, "f5d6020", "Belkin F5D6020", 0),
-	RTL_ROM(0x1186, 0x3300, "dwl510",  "D-Link DWL-510", 0),
-};
-
-struct pci_driver rtl818x_driver __pci_driver = {
-	.ids            = rtl818x_nics,
-	.id_count       = sizeof(rtl818x_nics) / sizeof(rtl818x_nics[0]),
-	.probe		= rtl818x_probe,
-	.remove		= rtl818x_remove,
-};

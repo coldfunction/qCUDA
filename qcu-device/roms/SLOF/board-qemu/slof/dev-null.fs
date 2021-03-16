@@ -12,7 +12,7 @@ new-device
 ;
 
 : read  ( adr len -- actual )
-  nip
+    2drop 0
 ;
 
 : setup-alias

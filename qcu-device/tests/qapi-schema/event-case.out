@@ -1,3 +1,6 @@
-[OrderedDict([('event', 'oops')])]
-[]
-[]
+object q_empty
+enum QType ['none', 'qnull', 'qnum', 'qstring', 'qdict', 'qlist', 'qbool']
+    prefix QTYPE
+module event-case.json
+event oops None
+   boxed=False

@@ -22,7 +22,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-#include <stdio.h>
+#include "qemu/osdep.h"
 #include "hw/hw.h"
 #include "hw/sh4/sh.h"
 #include "sysemu/sysemu.h"
@@ -30,6 +30,7 @@
 #include "sh7750_regnames.h"
 #include "hw/sh4/sh_intc.h"
 #include "cpu.h"
+#include "exec/exec-all.h"
 #include "exec/address-spaces.h"
 
 #define NB_DEVICES 4
@@ -416,7 +417,7 @@ static void sh7750_mem_writel(void *opaque, hwaddr addr,
     case SH7750_PTEH_A7:
         /* If asid changes, clear all registered tlb entries. */
         if ((s->cpu->env.pteh & 0xff) != (mem_value & 0xff)) {
-            tlb_flush(CPU(s->cpu), 1);
+            tlb_flush(CPU(s->cpu));
         }
         s->cpu->env.pteh = mem_value;
         return;

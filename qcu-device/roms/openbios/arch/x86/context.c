@@ -10,6 +10,8 @@
 #include "kernel/kernel.h"
 #include "segment.h"
 #include "context.h"
+#include "libopenbios/bindings.h"
+#include "libopenbios/initprogram.h"
 #include "libopenbios/sys_info.h"
 #include "boot.h"
 #include "openbios.h"
@@ -43,7 +45,10 @@ static struct context main_ctx __attribute__((section (".initctx"))) = {
 
 /* This is used by assembly routine to load/store the context which
  * it is to switch/switched.  */
-struct context *__context = &main_ctx;
+struct context * volatile __context = &main_ctx;
+
+/* Client program context */
+static struct context *client_ctx;
 
 /* Stack for loaded ELF image */
 static uint8_t image_stack[IMAGE_STACK_SIZE];
@@ -64,6 +69,11 @@ static void start_main(void)
     __boot_ctx = virt_to_phys(__context);
 
     init_exceptions();
+
+    /* Set up client context */
+    client_ctx = init_context(image_stack, sizeof image_stack, 1);
+    __context = client_ctx;
+
     /* Start the real fun */
     retval = openbios();
 
@@ -85,6 +95,16 @@ init_context(uint8_t *stack, uint32_t stack_size, int num_params)
 	(stack + stack_size - (sizeof(*ctx) + num_params*sizeof(uint32_t)));
     memset(ctx, 0, sizeof(*ctx));
 
+    return ctx;
+}
+
+/* init-program */
+int
+arch_init_program(void)
+{
+    struct context volatile *ctx = __context;
+    ucell type, entry, param;
+    
     /* Fill in reasonable default for flat memory model */
     ctx->gdt_base = virt_to_phys(gdt);
     ctx->gdt_limit = GDT_LIMIT;
@@ -96,8 +116,26 @@ init_context(uint8_t *stack, uint32_t stack_size, int num_params)
     ctx->ss = FLAT_DS;
     ctx->esp = virt_to_phys(ESP_LOC(ctx));
     ctx->return_addr = virt_to_phys(__exit_context);
+    
+    /* Set param */
+    feval("load-state >ls.param @");
+    param = POP();
+    ctx->param[0] = param;
 
-    return ctx;
+    /* Only elf-boot type has a param */
+    feval("load-state >ls.file-type @");
+    type = POP();
+    if (type == 0) {
+        ctx->eax = 0xe1fb007;
+        ctx->ebx = param;
+    }
+
+    /* Set entry point */
+    feval("load-state >ls.entry @");
+    entry = POP();
+    ctx->eip = entry;
+
+    return 0;
 }
 
 /* Switch to another context. */
@@ -115,16 +153,10 @@ struct context *switch_to(struct context *ctx)
 }
 
 /* Start ELF Boot image */
-unsigned int start_elf(unsigned long entry_point, unsigned long param)
+unsigned int start_elf(void)
 {
-    struct context *ctx;
+    volatile struct context *ctx = __context;
 
-    ctx = init_context(image_stack, sizeof image_stack, 1);
-    ctx->eip = entry_point;
-    ctx->param[0] = param;
-    ctx->eax = 0xe1fb007;
-    ctx->ebx = param;
-
-    ctx = switch_to(ctx);
+    ctx = switch_to((struct context *)ctx);
     return ctx->eax;
 }

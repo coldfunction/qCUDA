@@ -10,6 +10,7 @@
 #include "config.h" // CONFIG_*
 #include "fw/paravirt.h" // qemu_cfg_show_boot_menu
 #include "hw/pci.h" // pci_bdf_to_*
+#include "hw/pcidevice.h" // struct pci_device
 #include "hw/rtc.h" // rtc_read
 #include "hw/usb.h" // struct usbdevice_s
 #include "list.h" // hlist_node
@@ -19,6 +20,7 @@
 #include "std/disk.h" // struct mbr_s
 #include "string.h" // memset
 #include "util.h" // irqtimer_calc
+#include "tcgbios.h" // tpm_*
 
 
 /****************************************************************
@@ -111,9 +113,9 @@ build_pci_path(char *buf, int max, const char *devname, struct pci_device *pci)
     if (pci->parent) {
         p = build_pci_path(p, max, "pci-bridge", pci->parent);
     } else {
-        if (pci->rootbus)
-            p += snprintf(p, max, "/pci-root@%x", pci->rootbus);
         p += snprintf(p, buf+max-p, "%s", FW_PCI_DOMAIN);
+        if (pci->rootbus)
+            p += snprintf(p, buf+max-p, ",%x", pci->rootbus);
     }
 
     int dev = pci_bdf_to_dev(pci->bdf), fn = pci_bdf_to_fn(pci->bdf);
@@ -205,6 +207,13 @@ int bootprio_find_named_rom(const char *name, int instance)
     return find_prio(desc);
 }
 
+static int usb_portmap(struct usbdevice_s *usbdev)
+{
+    if (usbdev->hub->op->portmap)
+        return usbdev->hub->op->portmap(usbdev->hub, usbdev->port);
+    return usbdev->port + 1;
+}
+
 static char *
 build_usb_path(char *buf, int max, struct usbhub_s *hub)
 {
@@ -212,7 +221,7 @@ build_usb_path(char *buf, int max, struct usbhub_s *hub)
         // Root hub - nothing to add.
         return buf;
     char *p = build_usb_path(buf, max, hub->usbdev->hub);
-    p += snprintf(p, buf+max-p, "/hub@%x", hub->usbdev->port+1);
+    p += snprintf(p, buf+max-p, "/hub@%x", usb_portmap(hub->usbdev));
     return p;
 }
 
@@ -225,12 +234,12 @@ int bootprio_find_usb(struct usbdevice_s *usbdev, int lun)
     p = build_pci_path(desc, sizeof(desc), "usb", usbdev->hub->cntl->pci);
     p = build_usb_path(p, desc+sizeof(desc)-p, usbdev->hub);
     snprintf(p, desc+sizeof(desc)-p, "/storage@%x/*@0/*@0,%x"
-             , usbdev->port+1, lun);
+             , usb_portmap(usbdev), lun);
     int ret = find_prio(desc);
     if (ret >= 0)
         return ret;
     // Try usb-host/redir - for example: /pci@i0cf8/usb@1,2/usb-host@1
-    snprintf(p, desc+sizeof(desc)-p, "/usb-*@%x", usbdev->port+1);
+    snprintf(p, desc+sizeof(desc)-p, "/usb-*@%x", usb_portmap(usbdev));
     return find_prio(desc);
 }
 
@@ -370,24 +379,24 @@ boot_add_bcv(u16 seg, u16 ip, u16 desc, int prio)
 }
 
 void
-boot_add_floppy(struct drive_s *drive_g, const char *desc, int prio)
+boot_add_floppy(struct drive_s *drive, const char *desc, int prio)
 {
     bootentry_add(IPL_TYPE_FLOPPY, defPrio(prio, DefaultFloppyPrio)
-                  , (u32)drive_g, desc);
+                  , (u32)drive, desc);
 }
 
 void
-boot_add_hd(struct drive_s *drive_g, const char *desc, int prio)
+boot_add_hd(struct drive_s *drive, const char *desc, int prio)
 {
     bootentry_add(IPL_TYPE_HARDDISK, defPrio(prio, DefaultHDPrio)
-                  , (u32)drive_g, desc);
+                  , (u32)drive, desc);
 }
 
 void
-boot_add_cd(struct drive_s *drive_g, const char *desc, int prio)
+boot_add_cd(struct drive_s *drive, const char *desc, int prio)
 {
     bootentry_add(IPL_TYPE_CDROM, defPrio(prio, DefaultCDPrio)
-                  , (u32)drive_g, desc);
+                  , (u32)drive, desc);
 }
 
 // Add a CBFS payload entry
@@ -426,7 +435,7 @@ get_raw_keystroke(void)
 }
 
 // Read a keystroke - waiting up to 'msec' milliseconds.
-static int
+int
 get_keystroke(int msec)
 {
     u32 end = irqtimer_calc(msec);
@@ -459,8 +468,8 @@ interactive_bootmenu(void)
         ;
 
     char *bootmsg = romfile_loadfile("etc/boot-menu-message", NULL);
-    int menukey = romfile_loadint("etc/boot-menu-key", 0x86);
-    printf("%s", bootmsg ?: "\nPress F12 for boot menu.\n\n");
+    int menukey = romfile_loadint("etc/boot-menu-key", 1);
+    printf("%s", bootmsg ?: "\nPress ESC for boot menu.\n\n");
     free(bootmsg);
 
     u32 menutime = romfile_loadint("etc/boot-menu-wait", DEFAULT_BOOTMENU_WAIT);
@@ -480,15 +489,28 @@ interactive_bootmenu(void)
     int maxmenu = 0;
     struct bootentry_s *pos;
     hlist_for_each_entry(pos, &BootList, node) {
-        char desc[60];
+        char desc[77];
         maxmenu++;
         printf("%d. %s\n", maxmenu
                , strtcpy(desc, pos->description, ARRAY_SIZE(desc)));
     }
+    if (tpm_can_show_menu()) {
+        printf("\nt. TPM Configuration\n");
+    }
 
-    // Get key press
+    // Get key press.  If the menu key is ESC, do not restart boot unless
+    // 1.5 seconds have passed.  Otherwise users (trained by years of
+    // repeatedly hitting keys to enter the BIOS) will end up hitting ESC
+    // multiple times and immediately booting the primary boot device.
+    int esc_accepted_time = irqtimer_calc(menukey == 1 ? 1500 : 0);
     for (;;) {
         scan_code = get_keystroke(1000);
+        if (scan_code == 1 && !irqtimer_check(esc_accepted_time))
+            continue;
+        if (tpm_can_show_menu() && scan_code == 20 /* t */) {
+            printf("\n");
+            tpm_menu();
+        }
         if (scan_code >= 1 && scan_code <= maxmenu+1)
             break;
     }
@@ -622,6 +644,8 @@ boot_disk(u8 bootdrv, int checksig)
         }
     }
 
+    tpm_add_bcv(bootdrv, MAKE_FLATPTR(bootseg, 0), 512);
+
     /* Canonicalize bootseg:bootip */
     u16 bootip = (bootseg & 0x0fff) << 4;
     bootseg &= 0xf000;
@@ -631,13 +655,13 @@ boot_disk(u8 bootdrv, int checksig)
 
 // Boot from a CD-ROM
 static void
-boot_cdrom(struct drive_s *drive_g)
+boot_cdrom(struct drive_s *drive)
 {
     if (! CONFIG_CDROM_BOOT)
         return;
     printf("Booting from DVD/CD...\n");
 
-    int status = cdrom_boot(drive_g);
+    int status = cdrom_boot(drive);
     if (status) {
         printf("Boot failed: Could not read from CDROM (code %04x)\n", status);
         return;
@@ -645,6 +669,9 @@ boot_cdrom(struct drive_s *drive_g)
 
     u8 bootdrv = CDEmu.emulated_drive;
     u16 bootseg = CDEmu.load_segment;
+
+    tpm_add_cdrom(bootdrv, MAKE_FLATPTR(bootseg, 0), 512);
+
     /* Canonicalize bootseg:bootip */
     u16 bootip = (bootseg & 0x0fff) << 4;
     bootseg &= 0xf000;

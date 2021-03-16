@@ -24,6 +24,7 @@
  */
 
 #define __ASSEMBLY__
+#include "cpustate.h"
 #include "pstate.h"
 #include <asm/asi.h>
 #define ASI_BP ASI_PHYS_BYPASS_EC_E
@@ -181,7 +182,11 @@ tl0_resv130:	BTRAPS(0x130) BTRAPS(0x138)
 tl0_resv140:	BTRAPS(0x140) BTRAPS(0x148)
 tl0_resv150:	BTRAPS(0x150) BTRAPS(0x158)
 tl0_resv160:	BTRAPS(0x160) BTRAPS(0x168)
-tl0_resv170:	BTRAPS(0x170) BTRAPS(0x178)
+tl0_resv170:	BTRAPS(0x170) BTRAPS4(0x178)
+		BTRAP(0x17c)
+		TRAP_HANDLER(prom_debug)    ! 0x17d : debugger
+		TRAP_HANDLER(prom_debug)    ! 0x17e : debugger breakpoint
+		BTRAP(0x17f)
 tl0_resv180:	BTRAPS(0x180) BTRAPS(0x188)
 tl0_resv190:	BTRAPS(0x190) BTRAPS(0x198)
 tl0_resv1a0:	BTRAPS(0x1a0) BTRAPS(0x1a8)
@@ -264,7 +269,11 @@ tl1_resv130:	BTRAPS(0x130) BTRAPS(0x138)
 tl1_resv140:	BTRAPS(0x140) BTRAPS(0x148)
 tl1_resv150:	BTRAPS(0x150) BTRAPS(0x158)
 tl1_resv160:	BTRAPS(0x160) BTRAPS(0x168)
-tl1_resv170:	BTRAPS(0x170) BTRAPS(0x178)
+tl1_resv170:	BTRAPS(0x170) BTRAPS4(0x178)
+		BTRAP(0x17c)
+		TRAP_HANDLER(prom_debug)    ! 0x17d : debugger
+		TRAP_HANDLER(prom_debug)    ! 0x17e : debugger breakpoint
+		BTRAP(0x17f)
 tl1_resv180:	BTRAPS(0x180) BTRAPS(0x188)
 tl1_resv190:	BTRAPS(0x190) BTRAPS(0x198)
 tl1_resv1a0:	BTRAPS(0x1a0) BTRAPS(0x1a8)
@@ -276,20 +285,15 @@ tl1_resv1f0:	BTRAPS(0x1f0) BTRAPS(0x1f8)
 
 	.section ".data"
 	.align 8
-	.globl tlb_handler_stack_top, tlb_handler_stack_pointer, obp_ticks_pointer
+	.globl obp_ticks_pointer
 
-	! Stack for the tlb MMU trap handlers
-tlb_handler_stack_bottom:
-	.skip 8192
-tlb_handler_stack_top:
-	.skip 8
-
-	! MMU trap handler stack pointer
-tlb_handler_stack_pointer:
-	.xword tlb_handler_stack_top
 
 	! Pointer to current tick value
 obp_ticks_pointer:
+	.xword 0
+
+	! Saved context state
+debug_context:
 	.xword 0
 
         .section ".text", "ax"
@@ -336,234 +340,49 @@ fill_32bit:
         restored
         retry
 
-/*
- * SAVE_CPU_STATE and RESTORE_CPU_STATE are macros used to enable a context switch
- * to C to occur within the MMU I/D TLB miss handlers.
- *
- * Because these handlers are called on a TLB miss, we cannot use flushw to store
- * processor window state on the stack, as the memory areas used by each window's
- * stack pointer may not be in the TLB, causing recursive TLB miss traps.
- *
- * For this reason, we save window state by manually rotating the window registers
- * and saving their contents (along with other vital registers) into a special
- * tlb_handler_stack defined above which is guaranteed to be locked in the TLB, and
- * so won't cause issues with trap recursion.
- *
- * Once this process is complete, we remain in a TL=0, CWP=0 state (with IE=1 to allow
- * window fill/spill traps if required), switch to our safe tlb_handler_stack and 
- * invoke the miss handler.
- */
-
-#define SAVE_CPU_STATE(type) \
-	/* Set up our exception stack pointer in %g1 */ \
-	setx	tlb_handler_stack_pointer, %g7, %g6; \
-	ldx	[%g6], %g1; \
-	add	%g1, -0x510, %g1; \
-	\
-	/* First save the various state registers */ \
-	rdpr	%cwp, %g7; \
-	stx	%g7, [%g1]; \
-	rdpr	%cansave, %g7; \
-	stx	%g7, [%g1 + 0x8]; \
-	rdpr	%canrestore, %g7; \
-	stx	%g7, [%g1 + 0x10]; \
-	rdpr	%otherwin, %g7; \
-	stx	%g7, [%g1 + 0x18]; \
-	rdpr	%wstate, %g7; \
-	stx	%g7, [%g1 + 0x20]; \
-	rdpr	%cleanwin, %g7; \
-	stx	%g7, [%g1 + 0x28]; \
-	rdpr	%pstate, %g7; \
-	stx	%g7, [%g1 + 0x30]; \
-	\
-	rd	%y, %g7; \
-	stx	%g7, [%g1 + 0x38]; \
-	rd	%fprs, %g7; \
-	stx	%g7, [%g1 + 0x40]; \
-	\
-	rdpr	%tl, %g7; \
-	stx	%g7, [%g1 + 0x48]; \
-	\
-	/* Trap state */ \
-	add	%g1, 0x50, %g5; \
-	mov	4, %g6; \
-	\
-save_trap_state_##type: \
-	deccc	%g6; \
-	wrpr	%g6, %tl; \
-	rdpr	%tpc, %g7; \
-	stx	%g7, [%g5]; \
-	rdpr	%tnpc, %g7; \
-	stx	%g7, [%g5 + 0x8]; \
-	rdpr	%tstate, %g7; \
-	stx	%g7, [%g5 + 0x10]; \
-	rdpr	%tt, %g7; \
-	stx	%g7, [%g5 + 0x18]; \
-	bne	save_trap_state_##type; \
-	 add	%g5, 0x20, %g5; \
-	\
-	/* For 4 trap levels with 4 registers, memory required is 
-	4*8*4 = 0x80 bytes */ \
-	\
-	/* Save the o registers */ \
-	stx	%o0, [%g1 + 0xd0]; \
-	stx	%o1, [%g1 + 0xd8]; \
-	stx	%o2, [%g1 + 0xe0]; \
-	stx	%o3, [%g1 + 0xe8]; \
-	stx	%o4, [%g1 + 0xf0]; \
-	stx	%o5, [%g1 + 0xf8]; \
-	stx	%o6, [%g1 + 0x100]; \
-	stx	%o7, [%g1 + 0x108]; \
-	\
-	/* Now iterate through all of the windows saving all l and i registers */ \
-	add	%g1, 0x110, %g5; \
-	\
-	/* Get the number of windows in %g6 */ \
-	rdpr	%ver, %g6; \
-	and	%g6, 0xf, %g6; \
-	inc	%g6; \
-	\
-save_cpu_window_##type: \
-	deccc	%g6; \
-	wrpr	%g6, %cwp; \
-	stx	%l0, [%g5]; \
-	stx	%l1, [%g5 + 0x8]; \
-	stx	%l2, [%g5 + 0x10]; \
-	stx	%l3, [%g5 + 0x18]; \
-	stx	%l4, [%g5 + 0x20]; \
-	stx	%l5, [%g5 + 0x28]; \
-	stx	%l6, [%g5 + 0x30]; \
-	stx	%l7, [%g5 + 0x38]; \
-	stx	%i0, [%g5 + 0x40]; \
-	stx	%i1, [%g5 + 0x48]; \
-	stx	%i2, [%g5 + 0x50]; \
-	stx	%i3, [%g5 + 0x58]; \
-	stx	%i4, [%g5 + 0x60]; \
-	stx	%i5, [%g5 + 0x68]; \
-	stx	%i6, [%g5 + 0x70]; \
-	stx	%i7, [%g5 + 0x78]; \
-	bne	save_cpu_window_##type; \
-	 add	%g5, 0x80, %g5; \
-	\
-	/* For 8 windows with 16 registers to save in the window, memory required
-	is 16*8*8 = 0x400 bytes */ \
-	\
-	/* Now we should be in window 0 so update the other window registers */ \
-	rdpr	%ver, %g6; \
-	and	%g6, 0xf, %g6; \
-	dec	%g6; \
-	wrpr	%g6, %cansave; \
-	\
-	wrpr	%g0, %cleanwin; \
-	wrpr	%g0, %canrestore; \
-	wrpr	%g0, %otherwin; \
-	\
-	/* Update our exception stack pointer */ \
-	setx	tlb_handler_stack_pointer, %g7, %g6; \
-	stx	%g1, [%g6];
-
-
-#define RESTORE_CPU_STATE(type) \
-	/* Set up our exception stack pointer in %g1 */ \
-	setx	tlb_handler_stack_pointer, %g7, %g6; \
-	ldx	[%g6], %g1; \
-	\
-	/* Get the number of windows in %g6 */ \
-	rdpr	%ver, %g6; \
-	and	%g6, 0xf, %g6; \
-	inc	%g6; \
-	\
-	/* Now iterate through all of the windows restoring all l and i registers */ \
-	add	%g1, 0x110, %g5; \
-	\
-restore_cpu_window_##type: \
-	deccc	%g6; \
-	wrpr	%g6, %cwp; \
-	ldx	[%g5], %l0; \
-	ldx	[%g5 + 0x8], %l1; \
-	ldx	[%g5 + 0x10], %l2; \
-	ldx	[%g5 + 0x18], %l3; \
-	ldx	[%g5 + 0x20], %l4; \
-	ldx	[%g5 + 0x28], %l5; \
-	ldx	[%g5 + 0x30], %l6; \
-	ldx	[%g5 + 0x38], %l7; \
-	ldx	[%g5 + 0x40], %i0; \
-	ldx	[%g5 + 0x48], %i1; \
-	ldx	[%g5 + 0x50], %i2; \
-	ldx	[%g5 + 0x58], %i3; \
-	ldx	[%g5 + 0x60], %i4; \
-	ldx	[%g5 + 0x68], %i5; \
-	ldx	[%g5 + 0x70], %i6; \
-	ldx	[%g5 + 0x78], %i7; \
-	bne	restore_cpu_window_##type; \
-	 add	%g5, 0x80, %g5; \
-	\
-	/* Restore the window registers to their original value */ \
-	ldx	[%g1], %g7; \
-	wrpr	%g7, %cwp; \
-	ldx	[%g1 + 0x8], %g7; \
-	wrpr	%g7, %cansave; \
-	ldx	[%g1 + 0x10], %g7; \
-	wrpr	%g7, %canrestore; \
-	ldx	[%g1 + 0x18], %g7; \
-	wrpr	%g7, %otherwin; \
-	ldx	[%g1 + 0x20], %g7; \
-	wrpr	%g7, %wstate; \
-	ldx	[%g1 + 0x28], %g7; \
-	wrpr	%g7, %cleanwin; \
-	ldx	[%g1 + 0x30], %g7; \
-	wrpr	%g7, %pstate; \
-	\
-	/* Restore the o registers */ \
-	ldx	[%g1 + 0xd0], %o0; \
-	ldx	[%g1 + 0xd8], %o1; \
-	ldx	[%g1 + 0xe0], %o2; \
-	ldx	[%g1 + 0xe8], %o3; \
-	ldx	[%g1 + 0xf0], %o4; \
-	ldx	[%g1 + 0xf8], %o5; \
-	ldx	[%g1 + 0x100], %o6; \
-	ldx	[%g1 + 0x108], %o7; \
-	\
-	/* Restore the trap state */ \
-	add	%g1, 0x50, %g5; \
-	mov	4, %g6; \
-	\
-restore_trap_state_##type: \
-	deccc	%g6; \
-	wrpr	%g6, %tl; \
-	ldx	[%g5], %g7; \
-	wrpr	%g7, %tpc; \
-	ldx	[%g5 + 0x8], %g7; \
-	wrpr	%g7, %tnpc; \
-	ldx	[%g5 + 0x10], %g7; \
-	wrpr	%g7, %tstate; \
-	ldx	[%g5 + 0x18], %g7; \
-	wrpr	%g7, %tt; \
-	bne	restore_trap_state_##type; \
-	 add	%g5, 0x20, %g5; \
-	\
-	ldx	[%g1 + 0x38], %g7; \
-	wr	%g7, 0, %y; \
-	ldx	[%g1 + 0x40], %g7; \
-	wr	%g7, 0, %fprs; \
-	ldx	[%g1 + 0x48], %g7; \
-	wrpr	%g7, %tl; \
-	\
-	/* Restore exception stack pointer to previous value */ \
-	setx	tlb_handler_stack_pointer, %g7, %g6; \
-	add	%g1, 0x510, %g1; \
-	stx	%g1, [%g6];
-
 
         .globl reload_DMMU_tlb, reload_IMMU_tlb, bug
 
 reload_DMMU_tlb:
-
+	
+	/* Save CPU state to stack */
+	setx	_fcstack_ptr, %g6, %g7
+	ldx	[%g7], %g1
+	add	%g1, -CONTEXT_STATE_SIZE, %g1
+	stx	%g1, [%g7]
+	
 	SAVE_CPU_STATE(dtlb)
-
-	/* Switch to TLB locked stack space (note we add an additional 192 bytes required for
+	
+	RESET_CPU_WINDOW_STATE(dtlb)
+	
+	/* Switch to ordinary globals, saving to context */
+	mov	%g1, %o1
+	rdpr	%pstate, %o2
+	andn	%o2, PSTATE_MG, %o2
+	wrpr	%o2, %pstate
+	
+	stx	%g1, [%o1 + 0x30]
+	stx	%g2, [%o1 + 0x38]
+	stx	%g3, [%o1 + 0x40]
+	stx	%g4, [%o1 + 0x48]
+	stx	%g5, [%o1 + 0x50]
+	stx	%g6, [%o1 + 0x58]
+	stx	%g7, [%o1 + 0x60]
+	
+	/* Copy context back to %g1 */
+	mov	%o1, %g1
+	
+	/* Switch to 8K TLB locked OpenBIOS stack (note we add an additional 192 bytes required for
 	   gcc to save its arguments when building with -O0) */
-	add 	%g1, -STACK_BIAS - 192, %sp
+	setx	_fcstack_ptr, %g6, %g7
+	ldx	[%g7], %g6
+	setx	CONTEXT_STACK_SIZE, %g4, %g5
+	sub	%g6, %g5, %g6
+	stx	%g6, [%g7]
+	
+	setx	- 2047 - 192, %g6, %g7
+	add	%g1, %g7, %g7
+	mov	%g7, %sp
 
 	/* Enable interrupts for window spill/fill traps */
 	rdpr	%pstate, %g7
@@ -577,18 +396,79 @@ reload_DMMU_tlb:
 	rdpr	%pstate, %g7
 	andn	%g7, PSTATE_IE, %g7
 	wrpr	%g7, %pstate
+	
+	/* Restore CPU state from stack */
+	setx	_fcstack_ptr, %g6, %g7
+	ldx	[%g7], %g1
+	setx	CONTEXT_STACK_SIZE, %g4, %g5
+	add	%g1, %g5, %g1
+	stx	%g1, [%g7]
+	
+	/* Restore ordinary globals, switch back to memory globals */
+	mov	%g1, %o1
+	rdpr	%pstate, %o2
+	or	%o2, PSTATE_MG, %o2
 
+	ldx	[%o1 + 0x30], %g1
+	ldx	[%o1 + 0x38], %g2
+	ldx	[%o1 + 0x40], %g3
+	ldx	[%o1 + 0x48], %g4 
+	ldx	[%o1 + 0x50], %g5 
+	ldx	[%o1 + 0x58], %g6
+	ldx	[%o1 + 0x60], %g7
+	
+	wrpr	%o2, %pstate
+	mov	%o1, %g1
+	
 	RESTORE_CPU_STATE(dtlb)
-
-        retry
+	
+	setx	_fcstack_ptr, %g6, %g7
+	ldx	[%g7], %g1
+	add	%g1, CONTEXT_STATE_SIZE, %g1
+	stx	%g1, [%g7]
+	
+	retry
 
 reload_IMMU_tlb:
-
+	
+	/* Save CPU state to stack */
+	setx	_fcstack_ptr, %g6, %g7
+	ldx	[%g7], %g1
+	add	%g1, -CONTEXT_STATE_SIZE, %g1
+	stx	%g1, [%g7]
+	
 	SAVE_CPU_STATE(itlb)
-
-	/* Switch to TLB locked stack space (note we add an additional 192 bytes required for
+	
+	RESET_CPU_WINDOW_STATE(itlb)
+	
+	/* Switch to ordinary globals, saving to context */
+	mov	%g1, %o1
+	rdpr	%pstate, %o2
+	andn	%o2, PSTATE_MG, %o2
+	wrpr	%o2, %pstate
+	
+	stx	%g1, [%o1 + 0x30]
+	stx	%g2, [%o1 + 0x38]
+	stx	%g3, [%o1 + 0x40]
+	stx	%g4, [%o1 + 0x48]
+	stx	%g5, [%o1 + 0x50]
+	stx	%g6, [%o1 + 0x58]
+	stx	%g7, [%o1 + 0x60]
+	
+	/* Copy context back to %g1 */
+	mov	%o1, %g1
+	
+	/* Switch to 8K TLB locked OpenBIOS stack (note we add an additional 192 bytes required for
 	   gcc to save its arguments when building with -O0) */
-	add 	%g1, -STACK_BIAS - 192, %sp
+	setx	_fcstack_ptr, %g6, %g7
+	ldx	[%g7], %g6
+	setx	CONTEXT_STACK_SIZE, %g4, %g5
+	sub	%g6, %g5, %g6
+	stx	%g6, [%g7]
+	
+	setx	- 2047 - 192, %g6, %g7
+	add	%g1, %g7, %g7
+	mov	%g7, %sp
 
 	/* Enable interrupts for window spill/fill traps */
 	rdpr	%pstate, %g7
@@ -602,10 +482,148 @@ reload_IMMU_tlb:
 	rdpr	%pstate, %g7
 	andn	%g7, PSTATE_IE, %g7
 	wrpr	%g7, %pstate
+	
+	/* Restore CPU state from stack */
+	setx	_fcstack_ptr, %g6, %g7
+	ldx	[%g7], %g1
+	setx	CONTEXT_STACK_SIZE, %g4, %g5
+	add	%g1, %g5, %g1
+	stx	%g1, [%g7]
+	
+	/* Restore ordinary globals, switch back to memory globals */
+	mov	%g1, %o1
+	rdpr	%pstate, %o2
+	or	%o2, PSTATE_MG, %o2
 
+	ldx	[%o1 + 0x30], %g1
+	ldx	[%o1 + 0x38], %g2
+	ldx	[%o1 + 0x40], %g3
+	ldx	[%o1 + 0x48], %g4 
+	ldx	[%o1 + 0x50], %g5 
+	ldx	[%o1 + 0x58], %g6
+	ldx	[%o1 + 0x60], %g7
+	
+	wrpr	%o2, %pstate
+	mov	%o1, %g1
+	
 	RESTORE_CPU_STATE(itlb)
+	
+	setx	_fcstack_ptr, %g6, %g7
+	ldx	[%g7], %g1
+	add	%g1, CONTEXT_STATE_SIZE, %g1
+	stx	%g1, [%g7]
+	
+	retry
 
-        retry
+
+        .globl prom_debug_handler
+
+prom_debug:
+
+	/* Make sure all windows are on the stack */
+	flushw
+	
+	rdpr	%tl, %g7
+	rdpr	%tpc, %g6
+	rdpr	%tnpc, %g5
+
+	/* Save CPU state to stack */
+	setx	_fcstack_ptr, %g6, %g7
+	ldx	[%g7], %g1
+	add	%g1, -CONTEXT_STATE_SIZE, %g1
+	stx	%g1, [%g7]
+
+	SAVE_CPU_STATE(prom_debug)
+
+	RESET_CPU_WINDOW_STATE(prom_debug)
+
+	/* Switch to ordinary globals, saving to context */
+	mov	%g1, %o1
+	rdpr	%pstate, %o2
+	andn	%o2, PSTATE_AG, %o2
+	wrpr	%o2, %pstate
+	
+	stx	%g1, [%o1 + 0x30]
+	stx	%g2, [%o1 + 0x38]
+	stx	%g3, [%o1 + 0x40]
+	stx	%g4, [%o1 + 0x48]
+	stx	%g5, [%o1 + 0x50]
+	stx	%g6, [%o1 + 0x58]
+	stx	%g7, [%o1 + 0x60]
+	
+	/* Copy context back to %g1 */
+	mov	%o1, %g1
+	
+	/* Update __context to point to saved area */
+	setx	__context, %g6, %g7
+	ldx	[%g7], %g3
+	setx	debug_context, %g4, %g5
+	stx	%g3, [%g5]
+	stx	%g1, [%g7]
+
+	/* Switch to TLB locked OpenBIOS stack space (note we add an additional 192 bytes required for
+	   gcc to save its arguments when building with -O0) */
+	setx	_fcstack_ptr, %g6, %g7
+	ldx	[%g7], %g6
+	setx	CONTEXT_STACK_SIZE, %g4, %g5
+	sub	%g6, %g5, %g6
+	stx	%g6, [%g7]
+
+	setx	- 2047 - 192, %g6, %g7
+	add	%g1, %g7, %g7
+	mov	%g7, %sp
+
+	/* Enable interrupts for window spill/fill traps */
+	rdpr	%pstate, %g7
+	or	%g7, PSTATE_IE, %g7
+	wrpr	%g7, %pstate
+	
+	call	prom_debug_handler
+	 nop
+	
+	/* Disable interrupts */
+	rdpr	%pstate, %g7
+	andn	%g7, PSTATE_IE, %g7
+	wrpr	%g7, %pstate
+	
+	/* Restore CPU state from stack */
+	setx	_fcstack_ptr, %g6, %g7
+	ldx	[%g7], %g1
+	setx	CONTEXT_STACK_SIZE, %g4, %g5
+	add	%g1, %g5, %g1
+	stx	%g1, [%g7]
+	
+	/* Restore ordinary globals, switch back to alternate globals */
+	mov	%g1, %o1
+	rdpr	%pstate, %o2
+	or	%o2, PSTATE_AG, %o2
+	
+	ldx	[%o1 + 0x30], %g1
+	ldx	[%o1 + 0x38], %g2
+	ldx	[%o1 + 0x40], %g3
+	ldx	[%o1 + 0x48], %g4 
+	ldx	[%o1 + 0x50], %g5 
+	ldx	[%o1 + 0x58], %g6
+	ldx	[%o1 + 0x60], %g7
+	
+	wrpr	%o2, %pstate
+	mov	%o1, %g1
+	
+	RESTORE_CPU_STATE(prom_debug)
+	
+	/* Restore __context */
+	setx	debug_context, %g4, %g5
+	ldx	[%g5], %g3
+	setx	__context, %g6, %g7
+	stx	%g3, [%g7]
+
+	setx	_fcstack_ptr, %g6, %g7
+	ldx	[%g7], %g1
+	add	%g1, CONTEXT_STATE_SIZE, %g1
+	stx	%g1, [%g7]
+	
+	done
+
 
 softint_irq_tl1:
 softint_irq:

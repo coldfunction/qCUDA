@@ -1,3 +1,4 @@
+#include "qemu/osdep.h"
 #include "qemu-common.h"
 #include "qemu/iov.h"
 #include "qemu/error-report.h"
@@ -5,6 +6,8 @@
 #include "hw/virtio/virtio-bus.h"
 #include "hw/virtio/virtio-qcuda.h"
 #include <sys/mman.h>
+
+#include "cpu.h"
 
 #ifdef CONFIG_CUDA
 #include <cuda.h>
@@ -28,7 +31,6 @@
 #else
 #define ptrace(fmt, arg...)
 #endif
-
 
 #include "../../../qcu-driver/qcuda_common.h"
 
@@ -1559,3 +1561,4 @@ static void virtio_qcuda_register_types(void)
 }
 
 type_init(virtio_qcuda_register_types)
+

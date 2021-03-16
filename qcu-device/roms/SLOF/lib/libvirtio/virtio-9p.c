@@ -18,7 +18,7 @@
 
 #include "virtio-9p.h"
 #include "p9.h"
-
+#include "virtio-internal.h"
 
 /**
  * Notes for 9P Server config:
@@ -86,7 +86,7 @@ static void dprint_buffer(const char *name, uint8_t *buffer, int length)
  * @return	0 = success, -ve = error.
  */
 static int virtio_9p_transact(void *opaque, uint8_t *tx, int tx_size, uint8_t *rx,
-			      int *rx_size)
+			      uint32_t *rx_size)
 {
 	struct virtio_device *dev = opaque;
 	struct vring_desc *desc;
@@ -96,8 +96,7 @@ static int virtio_9p_transact(void *opaque, uint8_t *tx, int tx_size, uint8_t *r
 	struct vring_avail *vq_avail;
 	struct vring_used *vq_used;
 	volatile uint16_t *current_used_idx;
-	uint16_t last_used_idx;
-
+	uint16_t last_used_idx, avail_idx;
 
 	/* Virt IO queues. */
 	vq_size = virtio_get_qsize(dev, 0);
@@ -108,29 +107,27 @@ static int virtio_9p_transact(void *opaque, uint8_t *tx, int tx_size, uint8_t *r
 	last_used_idx = vq_used->idx;
 	current_used_idx = &vq_used->idx;
 
+	avail_idx = virtio_modern16_to_cpu(dev, vq_avail->idx);
+
 	/* Determine descriptor index */
-	id = (vq_avail->idx * 3) % vq_size;
+	id = (avail_idx * 3) % vq_size;
 
 	/* TX in first queue item. */
 	dprint_buffer("TX", tx, tx_size);
 
 	desc = &vq_desc[id];
-	desc->addr = (uint64_t)tx;
-	desc->len = tx_size;
-	desc->flags = VRING_DESC_F_NEXT;
-	desc->next = (id + 1) % vq_size;
+	virtio_fill_desc(desc, dev->is_modern, (uint64_t)tx, tx_size,
+			 VRING_DESC_F_NEXT, (id + 1) % vq_size);
 
 	/* RX in the second queue item. */
 	desc = &vq_desc[(id + 1) % vq_size];
-	desc->addr = (uint64_t)rx;
-	desc->len = *rx_size;
-	desc->flags = VRING_DESC_F_WRITE;
-	desc->next = 0;
+	virtio_fill_desc(desc, dev->is_modern, (uint64_t)rx, *rx_size,
+			 VRING_DESC_F_WRITE, 0);
 
 	/* Tell HV that the queue is ready */
-	vq_avail->ring[vq_avail->idx % vq_size] = id;
+	vq_avail->ring[avail_idx % vq_size] = virtio_cpu_to_modern16 (dev, id);
 	mb();
-	vq_avail->idx += 1;
+	vq_avail->idx = virtio_cpu_to_modern16(dev, avail_idx + 1);
 	virtio_queue_notify(dev, 0);
 
 	/* Receive the response. */
@@ -164,38 +161,44 @@ static int virtio_9p_transact(void *opaque, uint8_t *tx, int tx_size, uint8_t *r
 int virtio_9p_init(struct virtio_device *dev, void *tx_buf, void *rx_buf,
 		   int buf_size)
 {
-	struct vring_avail *vq_avail;
+	struct vqs vq;
+	int status = VIRTIO_STAT_ACKNOWLEDGE;
 
 	/* Check for double open */
 	if (__buf_size)
 		return -1;
 	__buf_size = buf_size;
 
-        dprintf("%s : device at %p\n", __func__, dev->base);
-        dprintf("%s : type is %04x\n", __func__, dev->type);
+	dprintf("%s : device at %p\n", __func__, dev->base);
+	dprintf("%s : type is %04x\n", __func__, dev->type);
 
-	/* Reset device */
-	// XXX That will clear the virtq base. We need to move
-	//     initializing it to here anyway
-	//
-	//	 virtio_reset_device(dev);
+	virtio_reset_device(dev);
 
 	/* Acknowledge device. */
-	virtio_set_status(dev, VIRTIO_STAT_ACKNOWLEDGE);
+	virtio_set_status(dev, status);
 
 	/* Tell HV that we know how to drive the device. */
-	virtio_set_status(dev, VIRTIO_STAT_ACKNOWLEDGE | VIRTIO_STAT_DRIVER);
+	status |= VIRTIO_STAT_DRIVER;
+	virtio_set_status(dev, status);
 
 	/* Device specific setup - we do not support special features */
-	virtio_set_guest_features(dev,  0);
+	if (dev->is_modern) {
+		if (virtio_negotiate_guest_features(dev, VIRTIO_F_VERSION_1))
+			goto dev_error;
+		virtio_get_status(dev, &status);
+	} else {
+		virtio_set_guest_features(dev, 0);
+	}
 
-	vq_avail = virtio_get_vring_avail(dev, 0);
-	vq_avail->flags = VRING_AVAIL_F_NO_INTERRUPT;
-	vq_avail->idx = 0;
+	if (virtio_queue_init_vq(dev, &vq, 0))
+		goto dev_error;
+
+	vq.avail->flags = virtio_cpu_to_modern16(dev, VRING_AVAIL_F_NO_INTERRUPT);
+	vq.avail->idx = 0;
 
 	/* Tell HV that setup succeeded */
-	virtio_set_status(dev, VIRTIO_STAT_ACKNOWLEDGE | VIRTIO_STAT_DRIVER
-			  |VIRTIO_STAT_DRIVER_OK);
+	status |= VIRTIO_STAT_DRIVER_OK;
+	virtio_set_status(dev, status);
 
 	/* Setup 9P library. */
 	p9_reg_transport(virtio_9p_transact, dev,(uint8_t *)tx_buf,
@@ -203,6 +206,12 @@ int virtio_9p_init(struct virtio_device *dev, void *tx_buf, void *rx_buf,
 
 	dprintf("%s : complete\n", __func__);
 	return 0;
+
+dev_error:
+	printf("%s: failed\n", __func__);
+	status |= VIRTIO_STAT_FAILED;
+	virtio_set_status(dev, status);
+	return -1;
 }
 
 /**
@@ -210,11 +219,11 @@ int virtio_9p_init(struct virtio_device *dev, void *tx_buf, void *rx_buf,
  */
 void virtio_9p_shutdown(struct virtio_device *dev)
 {
-        /* Quiesce device */
-        virtio_set_status(dev, VIRTIO_STAT_FAILED);
+	/* Quiesce device */
+	virtio_set_status(dev, VIRTIO_STAT_FAILED);
 
-        /* Reset device */
-        virtio_reset_device(dev);
+	/* Reset device */
+	virtio_reset_device(dev);
 
 	__buf_size = 0;
 }
@@ -228,7 +237,7 @@ void virtio_9p_shutdown(struct virtio_device *dev)
  * @param buffer[out]	Where to read the file to.
  * @return	+ve = amount of data read, -ve = error.
  */
-int virtio_9p_load(struct virtio_device *dev, const char *file_name, uint8_t *buffer)
+long virtio_9p_load(struct virtio_device *dev, const char *file_name, uint8_t *buffer)
 {
 	int rc;
 	uint16_t tag_len;
@@ -332,5 +341,5 @@ cleanup_connection:
 
 
 	dprintf("%s : complete, read %llu bytes\n", __func__, offset);
-	return rc == 0 ? offset : rc;
+	return rc == 0 ? (long)offset : rc;
 }

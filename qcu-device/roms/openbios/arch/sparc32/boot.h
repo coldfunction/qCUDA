@@ -9,14 +9,10 @@
 // linux_load.c
 int linux_load(struct sys_info *info, const char *file, const char *cmdline);
 
-// context.c
-extern struct context *__context;
-unsigned int start_elf(unsigned long entry_point, unsigned long param);
-
 // boot.c
 extern const char *bootpath;
 extern void boot(void);
-extern void go(void);
+extern void setup_romvec(void);
 
 // sys_info.c
 extern unsigned int qemu_mem_size;

@@ -18,6 +18,7 @@
  * You should have received a copy of the GNU General Public License along
  * with this program; if not, see <http://www.gnu.org/licenses/>.
  */
+#include "qemu/osdep.h"
 #include "hw/hw.h"
 #include "hw/block/flash.h"
 #include "hw/arm/omap.h"
@@ -642,7 +643,7 @@ static void omap_gpmc_write(void *opaque, hwaddr addr,
     case 0x010:	/* GPMC_SYSCONFIG */
         if ((value >> 3) == 0x3)
             fprintf(stderr, "%s: bad SDRAM idle mode %"PRIi64"\n",
-                            __FUNCTION__, value >> 3);
+                            __func__, value >> 3);
         if (value & 2)
             omap_gpmc_reset(s);
         s->sysconfig = value & 0x19;
@@ -805,7 +806,7 @@ static void omap_gpmc_write(void *opaque, hwaddr addr,
         break;
     case 0x230:	/* GPMC_TESTMODE_CTRL */
         if (value & 7)
-            fprintf(stderr, "%s: test mode enable attempt\n", __FUNCTION__);
+            fprintf(stderr, "%s: test mode enable attempt\n", __func__);
         break;
 
     default:
@@ -826,8 +827,7 @@ struct omap_gpmc_s *omap_gpmc_init(struct omap_mpu_state_s *mpu,
                                    qemu_irq irq, qemu_irq drq)
 {
     int cs;
-    struct omap_gpmc_s *s = (struct omap_gpmc_s *)
-            g_malloc0(sizeof(struct omap_gpmc_s));
+    struct omap_gpmc_s *s = g_new0(struct omap_gpmc_s, 1);
 
     memory_region_init_io(&s->iomem, NULL, &omap_gpmc_ops, s, "omap-gpmc", 0x1000);
     memory_region_add_subregion(get_system_memory(), base, &s->iomem);
@@ -864,7 +864,7 @@ void omap_gpmc_attach(struct omap_gpmc_s *s, int cs, MemoryRegion *iomem)
     assert(iomem);
 
     if (cs < 0 || cs >= 8) {
-        fprintf(stderr, "%s: bad chip-select %i\n", __FUNCTION__, cs);
+        fprintf(stderr, "%s: bad chip-select %i\n", __func__, cs);
         exit(-1);
     }
     f = &s->cs_file[cs];

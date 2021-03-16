@@ -65,7 +65,7 @@ static const pci_dev_t scsi_devices[] = {
 static const pci_dev_t ide_devices[] = {
     {
         PCI_VENDOR_ID_CMD, PCI_DEVICE_ID_CMD_646, /* CMD646 IDE controller */
-        "pci-ide", "pci-ata", NULL,
+        "ide", "ide", NULL,
 	"pci1095,646\0pci1095,646\0pciclass,01018f\0",
         0, 0, 0,
         ide_config_cb2, NULL,
@@ -127,6 +127,30 @@ static const pci_dev_t eth_devices[] = {
         NULL, "NE2000",   "NE2000 PCI",  NULL,
         0, 0, 0,
         NULL, "ethernet",
+    },
+    {
+        PCI_VENDOR_ID_REALTEK, PCI_DEVICE_ID_REALTEK_RTL8139,
+        NULL, "rtl8139",   "RTL8139 PCI",  "pci10ec,8139\0",
+        0, 0, 0,
+        rtl8139_config_cb, "ethernet",
+    },
+    {
+        PCI_VENDOR_ID_APPLE, PCI_DEVICE_ID_APPLE_UNI_N_GMAC,
+        NULL, "ethernet", NULL,  "gmac\0",
+        0, 0, 0,
+        sungem_config_cb, "ethernet",
+    },
+    {
+        PCI_VENDOR_ID_SUN, PCI_DEVICE_ID_SUN_HME,
+        NULL, "network", NULL, "SUNW,hme\0",
+        0, 0, 0,
+        sunhme_config_cb, "ethernet",
+    },
+    {
+        PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_E1000,
+        NULL, "e1000", NULL,  "pci1086,100e\0",
+        0, 0, 0,
+        eth_config_cb, "ethernet",
     },
     {
         /* Virtio-network controller */
@@ -365,7 +389,7 @@ static const pci_dev_t PCIbrg_devices[] = {
         PCI_VENDOR_ID_SUN, PCI_DEVICE_ID_SUN_SIMBA, NULL,
         "pci", "SUNW,simba", "pci108e,5000\0pciclass,060400\0",
         3, 2, 1,
-        bridge_config_cb, NULL,
+        simba_config_cb, NULL,
     },
     {
         0xFFFF, 0xFFFF,

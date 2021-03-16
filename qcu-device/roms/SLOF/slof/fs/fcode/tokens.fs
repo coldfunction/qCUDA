@@ -297,9 +297,9 @@ reset-token-table
 ' model             0 119 set-token
 ' device-type       0 11A set-token
 ' parse-2int        0 11B set-token
-\ ' is-install      0 11C set-token    \ Will be set by framebuffer code
-\ ' is-remove       0 11D set-token    \ Will be set by framebuffer code
-\ ' is-selftest     0 11E set-token    \ Will be set by framebuffer code
+' is-install        0 11C set-token    \ for framebuffer code
+' is-remove         0 11D set-token    \ for framebuffer code
+' is-selftest       0 11E set-token    \ for framebuffer code
 ' new-device        0 11F set-token
 ' diagnostic-mode?  0 120 set-token
 ' display-status    0 121 set-token    \ Maybe obsolete
@@ -321,56 +321,56 @@ reset-token-table
 
 \ Tokens 0x132 to 0x14f are reserved
 
-\ The following tokens will be set by the framebuffer code:
-\ ' #lines            0 150 set-token
-\ ' #columns          0 151 set-token
-\ ' line#             0 152 set-token
-\ ' column#           0 153 set-token
-\ ' inverse?          0 154 set-token
-\ ' inverse-screen?   0 155 set-token
+\ The following tokens are for the framebuffer code:
+' #lines            0 150 set-token
+' #columns          0 151 set-token
+' line#             0 152 set-token
+' column#           0 153 set-token
+' inverse?          0 154 set-token
+' inverse-screen?   0 155 set-token
 \ ' frame-buffer-busy 0 156 set-token  \ Historical, not supported
-\ ' draw-character    0 157 set-token
-\ ' reset-screen      0 158 set-token
-\ ' toggle-cursor     0 159 set-token
-\ ' erase-screen      0 15A set-token
-\ ' blink-screen      0 15B set-token
-\ ' invert-screen     0 15C set-token
-\ ' insert-characters 0 15D set-token
-\ ' delete-characters 0 15E set-token
-\ ' insert-lines      0 15F set-token
-\ ' delete-lines      0 160 set-token
-\ ' draw-logo         0 161 set-token
-\ ' frame-buffer-adr  0 162 set-token
-\ ' screen-height     0 163 set-token
-\ ' screen-width      0 164 set-token
-\ ' window-top        0 165 set-token
-\ ' window-left       0 166 set-token
+' draw-character    0 157 set-token
+' reset-screen      0 158 set-token
+' toggle-cursor     0 159 set-token
+' erase-screen      0 15A set-token
+' blink-screen      0 15B set-token
+' invert-screen     0 15C set-token
+' insert-characters 0 15D set-token
+' delete-characters 0 15E set-token
+' insert-lines      0 15F set-token
+' delete-lines      0 160 set-token
+' draw-logo         0 161 set-token
+' frame-buffer-adr  0 162 set-token
+' screen-height     0 163 set-token
+' screen-width      0 164 set-token
+' window-top        0 165 set-token
+' window-left       0 166 set-token
 \ '                   0 167 set-token  \ Reserved
 \ ' foreground-color  0 168 set-token  \ From 16-color recommended practice
 \ ' background-color  0 169 set-token  \ From 16-color recommended practice
-\ ' default-font      0 16A set-token
-\ ' set-font          0 16B set-token
-\ ' char-height       0 16C set-token
-\ ' char-width        0 16D set-token
-\ ' >font             0 16E set-token
-\ ' fontbytes         0 16F set-token
+' default-font      0 16A set-token
+' set-font          0 16B set-token
+' char-height       0 16C set-token
+' char-width        0 16D set-token
+' >font             0 16E set-token
+' fontbytes         0 16F set-token
 
 \ Tokens 0x170 to 0x17C are obsolete fb1 functions
 \ Tokens 0x17D to 0x17F are reserved
 
-\ The following tokens will be set by the framebuffer code, too:
-\ ' fb8-draw-character 0 180 set-token
-\ ' fb8-reset-screen   0 181 set-token
-\ ' fb8-toggle-cursor  0 182 set-token
-\ ' fb8-erase-screen   0 183 set-token
-\ ' fb8-blink-screen   0 184 set-token
-\ ' fb8-invert-screen  0 185 set-token
-\ ' fb8-insert-characters 0 186 set-token
-\ ' fb8-delete-characters 0 187 set-token
-\ ' fb8-insert-lines   0 188 set-token
-\ ' fb8-delete-lines   0 189 set-token
-\ ' fb8-draw-logo      0 18A set-token
-\ ' fb8-install        0 18B set-token
+\ The following tokens are for the framebuffer code, too:
+' fb8-draw-character 0 180 set-token
+' fb8-reset-screen   0 181 set-token
+' fb8-toggle-cursor  0 182 set-token
+' fb8-erase-screen   0 183 set-token
+' fb8-blink-screen   0 184 set-token
+' fb8-invert-screen  0 185 set-token
+' fb8-insert-characters 0 186 set-token
+' fb8-delete-characters 0 187 set-token
+' fb8-insert-lines   0 188 set-token
+' fb8-delete-lines   0 189 set-token
+' fb8-draw-logo      0 18A set-token
+' fb8-install        0 18B set-token
 
 \ Tokens 0x18C to 0x18F are reserved
 \ Tokens 0x190 to 0x196 are obsolete VMEbus tokens

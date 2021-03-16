@@ -186,12 +186,16 @@ DEFER old-emit
 
 \ set envvar(s) to default value
 : (set-default)  ( def-xt -- )
-   dup >name name>string $CREATE dup >body c@ >r execute r> CASE
-   1 OF env-int ENDOF
-   2 OF env-bytes ENDOF
-   3 OF env-string ENDOF
-   4 OF env-flag ENDOF
-   5 OF env-secmode ENDOF ENDCASE
+    dup >name name>string 2dup $CREATE
+    rot dup >body c@ >r
+    execute
+    r> CASE
+        1 OF dup env-int (.d) 2swap set-option ENDOF
+        2 OF 2dup env-bytes 2swap set-option ENDOF
+        3 OF 2dup env-string 2swap set-option ENDOF
+        4 OF dup env-flag IF s" true" ELSE s" false" THEN 2swap set-option ENDOF
+        5 OF dup env-secmode (.d) 2swap set-option ENDOF
+    ENDCASE
 ;
 
 \ Environment variables might be board specific
@@ -258,7 +262,7 @@ VARIABLE nvoff \ offset in envvar partition
       ." No NVRAM common partition, re-initializing..." cr
       internal-reset-nvram
       (nvupdate)
-      nvram-partition-type-common get-nvram-partition IF ." NVRAM seems to be broken." cr EXIT THEN
+      EXIT
    THEN
    \ partition header found: read data from nvram
    drop ( addr )           \ throw away offset

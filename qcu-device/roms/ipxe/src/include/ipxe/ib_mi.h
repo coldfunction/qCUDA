@@ -7,7 +7,7 @@
  *
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <ipxe/list.h>
 #include <ipxe/retry.h>
@@ -127,8 +127,9 @@ ib_create_madx ( struct ib_device *ibdev, struct ib_mad_interface *mi,
 extern void ib_destroy_madx ( struct ib_device *ibdev,
 			      struct ib_mad_interface *mi,
 			      struct ib_mad_transaction *madx );
-extern struct ib_mad_interface * ib_create_mi ( struct ib_device *ibdev,
-						enum ib_queue_pair_type type );
+extern int ib_create_mi ( struct ib_device *ibdev,
+			  enum ib_queue_pair_type type,
+			  struct ib_mad_interface **new_mi );
 extern void ib_destroy_mi ( struct ib_device *ibdev,
 			    struct ib_mad_interface *mi );
 

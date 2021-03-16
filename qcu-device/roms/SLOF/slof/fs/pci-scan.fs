@@ -24,6 +24,9 @@ VARIABLE pci-max-io
 VARIABLE pci-next-mem64           \ prefetchable 64-bit memory mapped
 VARIABLE pci-max-mem64
 
+\ 0 to default to natural alignment
+0 VALUE pci-mem-bar-min-align
+
 \ Counter of busses found
 0 VALUE pci-bus-number
 \ Counter of devices found
@@ -41,13 +44,6 @@ here 100 allot CONSTANT pci-device-vec
 \ enable/disable creation of hotplug-specific properties
 0 VALUE pci-hotplug-enabled
 
-
-\ Fixme Glue to the pci-devices ... remove this later
-: next-pci-mem ( addr -- addr ) pci-next-mem ;
-: next-pci-mmio ( addr -- addr ) pci-next-mmio ;
-: next-pci-io ( addr -- addr ) pci-next-io ;
-
-
 #include "pci-helper.fs"
 
 \ Dump out the pci device-slot vector
@@ -63,9 +59,14 @@ here 100 allot CONSTANT pci-device-vec
 
 \ prints out all relevant pci variables
 : pci-var-out ( -- )
-        s"   mem:" type pci-next-mem @ 16 0.r cr
-        s"  mmio:" type pci-next-mmio @ 16 0.r cr
-        s"    io:" type pci-next-io @ 16 0.r cr
+    ." pci-next-io    = " pci-next-io @ 10 0.r cr
+    ." pci-max-io     = " pci-max-io @ 10 0.r cr
+    ." pci-next-mem   = " pci-next-mem @ 10 0.r cr
+    ." pci-max-mem    = " pci-max-mem @ 10 0.r cr
+    ." pci-next-mmio  = " pci-next-mmio @ 10 0.r cr
+    ." pci-max-mmio   = " pci-max-mmio @ 10 0.r cr
+    ." pci-next-mem64 = " pci-next-mem64 @ 10 0.r cr
+    ." pci-max-mem64  = " pci-max-mem64 @ 10 0.r cr
 ;
 
 
@@ -85,7 +86,7 @@ here 100 allot CONSTANT pci-device-vec
 \ needed for scanning possible devices behind the bridge
 : pci-bridge-set-mmio-base ( addr -- )
         pci-next-mmio @ 100000 #aligned         \ read the current Value and align to 1MB boundary
-        dup 100000 + pci-next-mmio !            \ and write back with 1MB for bridge
+        dup pci-next-mmio !                     \ and write it back
         10 rshift                               \ mmio-base reg is only the upper 16 bits
         pci-max-mmio @ 1- FFFF0000 and or       \ and Insert mmio Limit (set it to max)
         swap 20 + rtas-config-l!                \ and write it into the bridge
@@ -95,46 +96,64 @@ here 100 allot CONSTANT pci-device-vec
 \ The Limit Value is one less then the upper boundary
 \ If the limit is less than the base the mmio is disabled
 : pci-bridge-set-mmio-limit ( addr -- )
-        pci-next-mmio @ 100000 #aligned         \ fetch current value and align to 1MB
+        pci-next-mmio @ 100000 +                \ add space for hot-plugging
+        100000 #aligned                         \ align to 1MB boundary
         dup pci-next-mmio !                     \ and write it back
         1- FFFF0000 and                         \ make it one less and keep upper 16 bits
         over 20 + rtas-config-l@ 0000FFFF and   \ fetch original value
         or swap 20 + rtas-config-l!             \ and write it into the Reg
 ;
 
-\ Update pci-next-mem to be 1MB aligned and set the mem-base and mem-base-upper register
-\ and set the Limit register to the maximum available address space
-\ needed for scanning possible devices behind the bridge
+\ Update pci-next-mem (or mem64) to be aligned and set the mem-base and
+\ mem-base-upper register. Also set the Limit register to the maximum available
+\ address space needed for scanning possible devices behind the bridge
 : pci-bridge-set-mem-base ( addr -- )
-        pci-next-mem @ 100000 #aligned          \ read the current Value and align to 1MB boundary
-        dup 100000 + pci-next-mem !             \ and write back with 1MB for bridge
-        over 24 + rtas-config-w@                \ check if 64bit support
-        1 and IF                                \ IF 64 bit support
-                2dup 20 rshift                  \ | keep upper 32 bits
-                swap 28 + rtas-config-l!        \ | and write it into the Base-Upper32-bits
-                pci-max-mem @ 20 rshift         \ | fetch max Limit address and keep upper 32 bits
-                2 pick 2C + rtas-config-l!      \ | and set the Limit
-        THEN                                    \ FI
-        10 rshift                               \ keep upper 16 bits
-        pci-max-mem @ 1- FFFF0000 and or        \ and Insert mmem Limit (set it to max)
-        swap 24 + rtas-config-l!                \ and write it into the bridge
+    dup 24 + rtas-config-w@ 1 and           \ does bridge support 64-bit?
+    pci-next-mem64 @ 0<> and IF             \ and do we have 64-bit memory?
+        \ Align variable to 4GB boundary
+        pci-next-mem64 @ 100000000 #aligned
+        dup pci-next-mem64 x!
+        \ Set base and limit registers:
+        20 rshift over 28 + rtas-config-l!  \ set prefetch base upper 32 bits
+        pci-next-mem64 @ 10 rshift FFF0 and
+        pci-max-mem64 @ 1- FFF00000 and or
+        over 24 + rtas-config-l!            \ set prefetch limit & base lower
+        pci-max-mem64 @ 1- 20 rshift
+        swap 2C + rtas-config-l!            \ and set the limit upper 32 bits
+    ELSE
+        \ Align variable to 1MB boundary
+        pci-next-mem @ 100000 #aligned
+        dup pci-next-mem !
+        \ Set base and limit register:
+        10 rshift FFF0 and
+        pci-max-mem @ 1- FFF00000 and or
+        swap 24 + rtas-config-l!
+    THEN
 ;
 
-\ Update pci-next-mem to be 1MB aligned and set the mem-limit register
-\ The Limit Value is one less then the upper boundary
-\ If the limit is less than the base the mem is disabled
+\ Update pci-next-mem (or -mem64) to be aligned (with some additional space
+\ for hot-plugging later) and set the mem-limit register. The Limit Value is
+\ one less then the upper boundary.
 : pci-bridge-set-mem-limit ( addr -- )
-        pci-next-mem @ 100000 #aligned          \ read the current Value and align to 1MB boundary
-        dup pci-next-mem !                      \ and write it back
-        1-                                      \ make limit one less than boundary
-        over 24 + rtas-config-w@                \ check if 64bit support
-        1 and IF                                \ IF 64 bit support
-                2dup 20 rshift                  \ | keep upper 32 bits
-                swap 2C + rtas-config-l!        \ | and write it into the Limit-Upper32-bits
-        THEN                                    \ FI
-        FFFF0000 and                            \ keep upper 16 bits
-        over 24 + rtas-config-l@ 0000FFFF and   \ fetch original Value
-        or swap 24 + rtas-config-l!             \ and write it into the bridge
+    dup 24 + rtas-config-w@ 1 and           \ does bridge support 64-bit?
+    pci-next-mem64 @ 0<> and IF             \ and do we have 64-bit memory?
+        \ Update current variable (add space for hot-plugging and align it)
+        pci-next-mem64 @ 80000000 +
+        100000000 #aligned
+        dup pci-next-mem64 x!
+        \ Update the limit registers:
+        1- 20 rshift
+        over 2C + rtas-config-l!            \ set the limit upper 32 bits
+        pci-next-mem64 @ 1- 10 rshift
+        swap 26 + rtas-config-w!            \ set limit lower bits
+    ELSE
+        \ Update current variable (add space for hot-plugging and align it)
+        pci-next-mem @ 100000 +
+        100000 #aligned
+        dup pci-next-mem !
+        1- 10 rshift
+        swap 26 + rtas-config-w!
+    THEN
 ;
 
 \ Update pci-next-io to be 4KB aligned and set the io-base and io-base-upper register
@@ -142,7 +161,7 @@ here 100 allot CONSTANT pci-device-vec
 \ needed for scanning possible devices behind the bridge
 : pci-bridge-set-io-base ( addr -- )
         pci-next-io @ 1000 #aligned             \ read the current Value and align to 4KB boundary
-        dup 1000 + pci-next-io !                \ and write back with 4K for bridge
+        dup pci-next-io !                       \ and write it back
         over 1C + rtas-config-l@                \ check if 32bit support
         1 and IF                                \ IF 32 bit support
                 2dup 10 rshift                  \ | keep upper 16 bits
@@ -159,7 +178,8 @@ here 100 allot CONSTANT pci-device-vec
 \ The Limit Value is one less then the upper boundary
 \ If the limit is less than the base the io is disabled
 : pci-bridge-set-io-limit ( addr -- )
-        pci-next-io @ 1000 #aligned             \ read the current Value and align to 4KB boundary
+        pci-next-io @ 800 +                     \ add space for hot-plugging
+        1000 #aligned                           \ align to 4KB boundary
         dup pci-next-io !                       \ and write it back
         1-                                      \ make limit one less than boundary
         over 1D + rtas-config-b@                \ check if 32bit support
@@ -214,6 +234,8 @@ DEFER func-pci-bridge-range-props
         dup pci-bridge-set-limits                       \ SetUp all Limit Registers
         drop                                            \ forget the config-addr
 ;
+DEFER func-pci-bridge-probe
+' pci-bridge-probe TO func-pci-bridge-probe
 
 \ set up the pci-device
 : pci-device-setup ( addr -- )

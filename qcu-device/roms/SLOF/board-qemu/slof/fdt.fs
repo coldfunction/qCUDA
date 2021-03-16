@@ -27,7 +27,7 @@ struct
   4 field >fdth_boot_cpu
   4 field >fdth_string_size
   4 field >fdth_struct_size
-drop
+constant /fdth
 
 h# d00dfeed constant OF_DT_HEADER
 h#        1 constant OF_DT_BEGIN_NODE
@@ -69,7 +69,7 @@ fdt-start fdt-init
         dup >fdth_version l@ 3 >= IF
             ."  strings size     : 0x" dup >fdth_string_size l@ . cr
         THEN
-        dup >fdth_version l@ 17 >= IF
+        dup >fdth_version l@ 11 >= IF
             ."  struct size      : 0x" dup >fdth_struct_size l@ . cr
         THEN
     THEN
@@ -279,8 +279,8 @@ fdt-claim-reserve
    2drop
 ;
 
-\ Replace one FDT phandle "old" with a OF1275 phandle "new" in the
-\ whole tree:
+\ Replace one phandle "old" with a phandle "new" in "node" and recursively
+\ in its child nodes:
 : fdt-replace-all-phandles ( old new node -- )
    \ ." Replacing in " dup node>path type cr
    >r
@@ -308,26 +308,33 @@ fdt-claim-reserve
    3drop
 ;
 
+\ Replace one FDT phandle "val" with a OF1275 phandle "node" in the
+\ whole tree:
+: fdt-update-phandle ( val node -- )
+   >r
+   FALSE TO (fdt-phandle-replaced)
+   r@ s" /" find-node               ( val node root )
+   fdt-replace-all-phandles
+   (fdt-phandle-replaced) IF
+      r@ set-node
+      s" phandle" delete-property
+      s" linux,phandle" delete-property
+   ELSE
+      diagnostic-mode? IF
+         cr ." Warning: Did not replace phandle in " r@ node>path type cr
+      THEN
+   THEN
+r> drop
+;
+
 \ Check whether a node has "phandle" or "linux,phandle" properties
 \ and replace them:
 : fdt-fix-node-phandle  ( node -- )
    >r
-   FALSE TO (fdt-phandle-replaced)
    s" phandle" r@ get-property 0= IF
-      decode-int                       ( p-addr2 p-len2 val )
+      decode-int nip nip
       \ ." found phandle: " dup . cr
-      r@ s" /" find-node               ( p-addr2 p-len2 val node root )  
-      fdt-replace-all-phandles         ( p-addr2 p-len2 )
-      2drop
-      (fdt-phandle-replaced) IF
-         r@ set-node
-         s" phandle" delete-property
-         s" linux,phandle" delete-property
-      ELSE
-         diagnostic-mode? IF
-            cr ." Warning: Did not replace phandle in " r@ node>path type cr
-         THEN
-      THEN
+      r@ fdt-update-phandle
    THEN
    r> drop
 ;

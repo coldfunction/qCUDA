@@ -35,6 +35,7 @@
 #define NO_QEMU_PROTOS
 #include "arch/common/fw_cfg.h"
 #include "arch/ppc/processor.h"
+#include "context.h"
 
 #define UUID_FMT "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x"
 
@@ -105,8 +106,11 @@ static const pci_arch_t known_arch[] = {
         .mem_len = 0x10000000,
         .io_base = 0x80000000,
         .io_len = 0x00010000,
-        .rbase = 0x00000000,
-        .rlen = 0x00400000,
+        .host_ranges = {
+            { .type = IO_SPACE, .parentaddr = 0, .childaddr = 0x80000000, .len = 0x00010000 },
+            { .type = MEMORY_SPACE_32, .parentaddr = 0, .childaddr = 0xc0100000, .len = 0x10000000 },
+            { .type = 0, .parentaddr = 0, .childaddr = 0, .len = 0 }
+         },
         .irqs = { 9, 11, 9, 11 }
     },
     [ARCH_MAC99] = {
@@ -122,8 +126,11 @@ static const pci_arch_t known_arch[] = {
         .mem_len = 0x10000000,
         .io_base = 0xf2000000,
         .io_len = 0x00800000,
-        .rbase = 0x00000000,
-        .rlen = 0x01000000,
+        .host_ranges = {
+            { .type = IO_SPACE, .parentaddr = 0, .childaddr = 0xf2000000, .len = 0x00800000 },
+            { .type = MEMORY_SPACE_32, .parentaddr = 0x80000000, .childaddr = 0x80000000, .len = 0x10000000 },
+            { .type = 0, .parentaddr = 0, .childaddr = 0, .len = 0 }
+         },
         .irqs = { 0x1b, 0x1c, 0x1d, 0x1e }
     },
     [ARCH_MAC99_U3] = {
@@ -139,8 +146,11 @@ static const pci_arch_t known_arch[] = {
         .mem_len = 0x10000000,
         .io_base = 0xf2000000,
         .io_len = 0x00800000,
-        .rbase = 0x00000000,
-        .rlen = 0x01000000,
+        .host_ranges = {
+            { .type = IO_SPACE, .parentaddr = 0, .childaddr = 0xf2000000, .len = 0x00800000 },
+            { .type = MEMORY_SPACE_32, .parentaddr = 0x80000000, .childaddr = 0x80000000, .len = 0x10000000 },
+            { .type = 0, .parentaddr = 0, .childaddr = 0, .len = 0 }
+         },
         .irqs = { 0x1b, 0x1c, 0x1d, 0x1e }
     },
     [ARCH_HEATHROW] = {
@@ -156,8 +166,12 @@ static const pci_arch_t known_arch[] = {
         .mem_len = 0x10000000,
         .io_base = 0xfe000000,
         .io_len = 0x00800000,
-        .rbase = 0xfd000000,
-        .rlen = 0x01000000,
+        .host_ranges = {
+            { .type = IO_SPACE, .parentaddr = 0, .childaddr = 0xfe000000, .len = 0x00800000 },
+            { .type = MEMORY_SPACE_32, .parentaddr = 0, .childaddr = 0xfd000000, .len = 0x01000000 },
+            { .type = MEMORY_SPACE_32, .parentaddr = 0x80000000, .childaddr = 0x80000000, .len = 0x10000000 },
+            { .type = 0, .parentaddr = 0, .childaddr = 0, .len = 0 }
+         },
         .irqs = { 21, 22, 23, 24 }
     },
 };
@@ -301,6 +315,11 @@ cpu_generic_init(const struct cpudef *cpu)
     push_str("running");
     fword("encode-string");
     push_str("state");
+    fword("property");
+
+    PUSH(0x20);
+    fword("encode-int");
+    push_str("reservation-granule-size");
     fword("property");
 }
 
@@ -589,17 +608,15 @@ id_cpu(void)
     }
 }
 
-static void go(void);
+static void arch_go(void);
 
 static void
-go(void)
+arch_go(void)
 {
-    ucell addr;
-
-    feval("saved-program-state >sps.entry @");
-    addr = POP();
-
-    call_elf(0, 0, addr);
+    /* Insert copyright property for MacOS 9 and below */
+    if (find_dev("/rom/macos")) {
+        fword("insert-copyright-property");
+    }
 }
 
 static void kvm_of_init(void)
@@ -678,6 +695,60 @@ static void ffilll(void)
     for (len = 0; len < bytes / sizeof(u32); len++) {
         *laddr++ = longval;
     }   
+}
+
+/*
+ * adler32        ( adler buf len -- checksum )
+ *
+ * Adapted from Mark Adler's original implementation (zlib license)
+ *
+ * Both OS 9 and BootX require this word for payload validation.
+ */
+
+#define DO1(buf,i)  {s1 += buf[i]; s2 += s1;}
+#define DO2(buf,i)  DO1(buf,i); DO1(buf,i+1);
+#define DO4(buf,i)  DO2(buf,i); DO2(buf,i+2);
+#define DO8(buf,i)  DO4(buf,i); DO4(buf,i+4);
+#define DO16(buf)   DO8(buf,0); DO8(buf,8);
+
+static void adler32(void)
+{
+    uint32_t len = (uint32_t)POP();
+    char *buf = (char *)POP();
+    uint32_t adler = (uint32_t)POP();
+
+    if (buf == NULL) {
+        RET(-1);
+    }
+
+    uint32_t base = 65521;
+    uint32_t nmax = 5552;
+
+    uint32_t s1 = adler & 0xffff;
+    uint32_t s2 = (adler >> 16) & 0xffff;
+
+    uint32_t k;
+    while (len > 0) {
+        k = (len < nmax ? len : nmax);
+        len -= k;
+
+        while (k >= 16) {
+            DO16(buf);
+            buf += 16;
+            k -= 16;
+        }
+        if (k != 0) {
+            do {
+                s1 += *buf++;
+                s2 += s1;
+            } while (--k);
+        }
+
+        s1 %= base;
+        s2 %= base;
+    }
+
+    RET(s2 << 16 | s1);
 }
 
 void
@@ -861,11 +932,11 @@ arch_of_init(void)
     if (fw_cfg_read_i16(FW_CFG_NOGRAPHIC)) {
         if (is_apple()) {
             if (CONFIG_SERIAL_PORT) {
-                stdin_path = "scca";
-                stdout_path = "scca";
-            } else {
                 stdin_path = "sccb";
                 stdout_path = "sccb";
+            } else {
+                stdin_path = "scca";
+                stdout_path = "scca";
             }
         } else {
             stdin_path = "ttya";
@@ -945,7 +1016,10 @@ arch_of_init(void)
 
     /* Implementation of filll word (required by BootX) */
     bind_func("filll", ffilll);
+
+    /* Implementation of adler32 word (required by OS 9, BootX) */
+    bind_func("(adler32)", adler32);
     
     bind_func("platform-boot", boot);
-    bind_func("(go)", go);
+    bind_func("(arch-go)", arch_go);
 }

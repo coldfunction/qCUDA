@@ -11,6 +11,7 @@
 #include "psr.h"
 #include "asm/asi.h"
 #include "asm/crs.h"
+#include "cpustate.h"
 #define NO_QEMU_PROTOS
 #define NO_OPENBIOS_PROTOS
 #include "arch/common/fw_cfg.h"
@@ -30,7 +31,7 @@
 
 #define WRITE_PAUSE    nop; nop; nop; /* Have to do this after %wim/%psr chg */
 
-        .globl	entry, _entry
+        .globl	entry, _entry, nwindows
 
 	.section ".text", "ax"
 	.align	8
@@ -69,6 +70,9 @@
 	 * Bottom
 	 */
 
+nwindows:
+        .word 0
+        
 /*
  * Entry point
  * We start execution from here.
@@ -122,6 +126,17 @@ entry:
         or      %g3, %g4, %g1
         ! %g1 contains end of memory
 
+        ! Get CPU number
+        ! XXX: not all CPUs should have MXCC
+        set     0x1c00f00, %g2
+        ldda    [%g2] ASI_CONTROL, %g2
+        srl     %g3, 24, %g7
+        subcc   %g7, 8, %g7
+
+        ! Only the first CPU clears memory
+        bnz     clear_done
+         nop
+
         ! Get kernel address from configuration device
         ! NB: little endian format
         mov     FW_CFG_KERNEL_ADDR, %g2
@@ -164,23 +179,6 @@ clear_done:
         set     0x2000, %g3
         sub     %g1, %g3, %g6
 
-        ! Check if this is the boot CPU and skip SMP table check if yes
-        ! XXX: not all CPUs should have MXCC
-        set     0x1c00f00, %g2
-        ldda    [%g2] ASI_CONTROL, %g2
-        srl     %g3, 24, %g7
-        sub     %g7, 8, %g7
-        tst     %g7
-        bz      skip_table
-         nop
-
-        ! Calculate SMP table location
-	set	0x1f0c, %g2
-        add     %g6, %g2, %g2                 ! valid?
-        lda     [%g2] ASI_M_BYPASS, %g7
-        sta     %g0, [%g2] ASI_M_BYPASS
-
-skip_table:
         ! Get machine ID from configuration device
         mov     FW_CFG_MACHINE_ID, %g2
         sub     %g5, 2, %g5
@@ -201,58 +199,45 @@ skip_table:
         blu     ss2
          nop
 
-        ! Ok, this is SS-5
-
-        tst     %g7
-        bz      first_cpu
+        ! Ok, this is SS-5, uniprocessor
+        ba      first_cpu
          nop
 
-        ! Clear softints used for SMP CPU startup
-        set     PHYS_JJ_INTR0 + 0x04, %g1
-        sll     %g2, 12, %g2
-        add     %g1, %g2, %g2
-        set     0xffffffff, %g1
-        sta     %g1, [%g2] ASI_M_BYPASS         ! clear softints
-        add     %g2, 4, %g2
-        sta     %g0, [%g2] ASI_M_BYPASS         ! clear softints
-
-load_ctx:
-        ! SMP init, jump to user specified address
-	set	0x1f04, %g5
-        add     %g6, %g5, %g5                 ! ctxtbl
-        lda     [%g5] ASI_M_BYPASS, %g2
-        sta     %g0, [%g5] ASI_M_BYPASS
-        set     AC_M_CTPR, %g1
-        sta     %g2, [%g1] ASI_M_MMUREGS        ! set ctx table ptr
-	set	0x1f00, %g5
-        add     %g6, %g5, %g5                 ! ctx
-        lda     [%g5] ASI_M_BYPASS, %g2
-        sta     %g0, [%g5] ASI_M_BYPASS
-        set     AC_M_CXR, %g1
-        sta     %g2, [%g1] ASI_M_MMUREGS        ! set context
-	set	0x1f08, %g5
-        add     %g6, %g5, %g5                 ! entry
-        lda     [%g5] ASI_M_BYPASS, %g2
-        sta     %g0, [%g5] ASI_M_BYPASS
-        set     1, %g1
-        jmp     %g2                             ! jump to kernel
-         sta    %g1, [%g0] ASI_M_MMUREGS        ! enable mmu
-
 ss10:
-        ! Ok, this is SS-10 or SS-600MP
+        ! Ok, this is SS-10/20 or SS-600MP
         tst     %g7
         bz      first_cpu
          nop
 
         ! Clear softints used for SMP CPU startup
         set     PHYS_SS10_INTR0 + 0x04, %g1
-        sll     %g2, 12, %g2
+        sll     %g7, 12, %g2
         add     %g1, %g2, %g2
         set     0xffffffff, %g1
         sta     %g1, [%g2] ASI_M_CTL            ! clear softints
         add     %g2, 4, %g2
-        b       load_ctx
-         sta    %g0, [%g2] ASI_M_CTL            ! clear softints
+        sta     %g0, [%g2] ASI_M_CTL            ! clear softints
+
+        ! SMP init, jump to user specified address
+        set     0x1f04, %g5
+        add     %g6, %g5, %g5                 ! ctxtbl
+        lda     [%g5] ASI_M_BYPASS, %g2
+        sta     %g0, [%g5] ASI_M_BYPASS
+        set     AC_M_CTPR, %g1
+        sta     %g2, [%g1] ASI_M_MMUREGS        ! set ctx table ptr
+        set     0x1f00, %g5
+        add     %g6, %g5, %g5                 ! ctx
+        lda     [%g5] ASI_M_BYPASS, %g2
+        sta     %g0, [%g5] ASI_M_BYPASS
+        set     AC_M_CXR, %g1
+        sta     %g2, [%g1] ASI_M_MMUREGS        ! set context
+        set     0x1f08, %g5
+        add     %g6, %g5, %g5                 ! entry
+        lda     [%g5] ASI_M_BYPASS, %g2
+        sta     %g0, [%g5] ASI_M_BYPASS
+        set     1, %g1
+        jmp     %g2                             ! jump to kernel
+         sta    %g1, [%g0] ASI_M_MMUREGS        ! enable mmu
 
 ss2:
         ! Ok, this is SS-2
@@ -460,6 +445,9 @@ highmem:
         wr      %g1, 0x0, %wim                  ! make window 1 invalid
         WRITE_PAUSE
 
+        set     nwindows, %g2                   ! store nwindows
+        st      %g3, [%g2]
+        
         cmp     %g3, 0x7
         bne     1f
          nop
@@ -490,8 +478,21 @@ highmem:
         wr	%g3, PSR_ET, %psr
         WRITE_PAUSE
 
-        set     0, %fp
-        call    __switch_context_nosave
+        /* Set up a default context */
+        set     __context, %g1
+        ld      [%g1], %g1
+        
+        SAVE_CPU_GENERAL_STATE(entry)
+        SAVE_CPU_WINDOW_STATE(entry)
+        
+        /* Set up local stack pointer */
+        set     _estack - 0x40, %sp
+        
+        /* And for the main context */
+        add     %sp, -0x260, %g2 
+        st      %g2, [%g1 + 0x48]
+
+        call    __switch_context
          nop
 
         /* We get here when the main context switches back to

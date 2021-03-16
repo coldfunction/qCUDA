@@ -897,7 +897,7 @@ arch_init( void )
 		push_str("floppy");
 		break;
 	case 'c':
-		push_str("disk");
+		push_str("disk:a disk");
 		break;
 	default:
 	case 'd':
@@ -915,7 +915,7 @@ arch_init( void )
 	device_end();
 	
 	bind_func("platform-boot", boot );
-	bind_func("(go)", go );
+	bind_func("(arch-go)", setup_romvec );
 	
 	/* Set up other properties */
         push_str("/chosen");

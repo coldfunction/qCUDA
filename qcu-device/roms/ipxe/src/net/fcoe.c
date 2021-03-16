@@ -15,9 +15,13 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA.
+ *
+ * You can also choose to distribute this program under the terms of
+ * the Unmodified Binary Distribution Licence (as given in the file
+ * COPYING.UBDL), provided that you have satisfied its requirements.
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -1090,7 +1094,7 @@ static void fcoe_expired ( struct retry_timer *timer, int over __unused ) {
 
 		/* Send keepalive */
 		start_timer_fixed ( &fcoe->timer,
-			      ( ( fcoe->keepalive * TICKS_PER_SEC ) / 1000 ) );
+				    ( fcoe->keepalive * TICKS_PER_MS ) );
 		fcoe_fip_tx_keepalive ( fcoe );
 
 		/* Abandon FCF if we have not seen its advertisements */

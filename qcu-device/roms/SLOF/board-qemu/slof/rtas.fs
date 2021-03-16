@@ -98,6 +98,12 @@ find-qemu-rtas
 ;
 
 : rtas-quiesce ( -- )
+    fdt-flatten-tree
+    dup hv-update-dt ?dup IF
+        \ Ignore hcall not implemented error, print error otherwise
+        dup -2 <> IF ." HV-UPDATE-DT error: " . cr ELSE drop THEN
+    THEN
+    fdt-flatten-tree-free
     " quiesce" rtas-get-token rtas-cb rtas>token l!
     0 rtas-cb rtas>nargs l!
     0 rtas-cb rtas>nret l!
@@ -108,12 +114,11 @@ find-qemu-rtas
 0 value puid
 
 : rtas-do-config-@ ( config-addr size -- value)
-    \ We really want to cache this !
-    " ibm,read-pci-config" rtas-get-token rtas-cb rtas>token l!
+    [ s" ibm,read-pci-config" rtas-get-token ] LITERAL rtas-cb rtas>token l!
     4 rtas-cb rtas>nargs l!
     2 rtas-cb rtas>nret l!
     ( addr size ) rtas-cb rtas>args3 l!
-    puid ffffffff and rtas-cb rtas>args2 l!
+    puid rtas-cb rtas>args2 l!
     puid 20 rshift rtas-cb rtas>args1 l!
     ( addr ) rtas-cb rtas>args0 l!
     enter-rtas
@@ -127,12 +132,11 @@ find-qemu-rtas
 ;
 
 : rtas-do-config-! ( value config-addr size )
-    \ We really want to cache this !
-    " ibm,write-pci-config" rtas-get-token rtas-cb rtas>token l!
+    [ s" ibm,write-pci-config" rtas-get-token ] LITERAL rtas-cb rtas>token l!
     5 rtas-cb rtas>nargs l!
     1 rtas-cb rtas>nret l!
     ( value addr size ) rtas-cb rtas>args3 l!
-    puid ffffffff and rtas-cb rtas>args2 l!
+    puid rtas-cb rtas>args2 l!
     puid 20 rshift rtas-cb rtas>args1 l!
     ( value addr ) rtas-cb rtas>args0 l!
     ( value ) rtas-cb rtas>args4 l!
@@ -172,16 +176,16 @@ rtas-node set-node
 : open true ;
 : close ;
 
+: store-rtas-loc ( adr )
+    s" /rtas" find-node >r
+    encode-int s" slof,rtas-base" r@ set-property
+    rtas-size encode-int s" slof,rtas-size" r> set-property
+;
+
 : instantiate-rtas ( adr -- entry )
+    dup store-rtas-loc
     dup rtas-base swap rtas-size move
-    dup rtas-entry rtas-base - +
-    2dup hv-rtas-update dup 0 <> IF
-	\ Ignore hcall not implemented error, print error otherwise
-	dup -2 <> IF ." HV-RTAS-UPDATE error: " . cr ELSE drop THEN
-    ELSE
-	drop
-    THEN
-    nip
+    rtas-entry rtas-base - +
 ;
 
 device-end

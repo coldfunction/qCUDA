@@ -17,7 +17,7 @@
 
 
 int
-puts(char *str)
+puts(const char *str)
 {
 	int ret;
 

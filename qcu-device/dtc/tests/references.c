@@ -29,7 +29,7 @@
 
 static void check_ref(const void *fdt, int node, uint32_t checkref)
 {
-	const uint32_t *p;
+	const fdt32_t *p;
 	uint32_t ref;
 	int len;
 
@@ -54,6 +54,23 @@ static void check_ref(const void *fdt, int node, uint32_t checkref)
 	if (ref != checkref)
 		FAIL("'lref' in node at %d has value 0x%x instead of 0x%x",
 		     node, ref, checkref);
+}
+
+static void check_rref(const void *fdt)
+{
+	const fdt32_t *p;
+	uint32_t ref;
+	int len;
+
+	p = fdt_getprop(fdt, 0, "rref", &len);
+	if (!p)
+		FAIL("fdt_getprop(0, \"rref\"): %s", fdt_strerror(len));
+	if (len != sizeof(*p))
+		FAIL("'rref' in root node has wrong size (%d instead of %zd)",
+		     len, sizeof(*p));
+	ref = fdt32_to_cpu(*p);
+	if (ref != fdt_get_phandle(fdt, 0))
+		FAIL("'rref' in root node has value 0x%x instead of 0x0", ref);
 }
 
 int main(int argc, char *argv[])
@@ -103,6 +120,8 @@ int main(int argc, char *argv[])
 	check_ref(fdt, n1, h2);
 	check_ref(fdt, n2, h1);
 	check_ref(fdt, n3, h4);
+
+	check_rref(fdt);
 
 	PASS();
 }

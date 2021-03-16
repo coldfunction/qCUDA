@@ -34,8 +34,8 @@ enum {
 typedef struct VFIOINTp {
     QLIST_ENTRY(VFIOINTp) next; /* entry for IRQ list */
     QSIMPLEQ_ENTRY(VFIOINTp) pqnext; /* entry for pending IRQ queue */
-    EventNotifier interrupt; /* eventfd triggered on interrupt */
-    EventNotifier unmask; /* eventfd for unmask on QEMU bypass */
+    EventNotifier *interrupt; /* eventfd triggered on interrupt */
+    EventNotifier *unmask; /* eventfd for unmask on QEMU bypass */
     qemu_irq qemuirq;
     struct VFIOPlatformDevice *vdev; /* back pointer to device */
     int state; /* inactive, pending, active */
@@ -74,4 +74,4 @@ typedef struct VFIOPlatformDeviceClass {
 #define VFIO_PLATFORM_DEVICE_GET_CLASS(obj) \
      OBJECT_GET_CLASS(VFIOPlatformDeviceClass, (obj), TYPE_VFIO_PLATFORM)
 
-#endif /*HW_VFIO_VFIO_PLATFORM_H*/
+#endif /* HW_VFIO_VFIO_PLATFORM_H */

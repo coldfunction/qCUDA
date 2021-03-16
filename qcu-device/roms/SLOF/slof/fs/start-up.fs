@@ -62,67 +62,20 @@
 ;
 
 
-#include "sms/sms-load.fs"
-
-
 \ Watchdog will be rearmed during load if use-load-watchdog variable is TRUE
 TRUE VALUE use-load-watchdog?
 
-1 value my-boot-dev
-1 value digit-val
-0 value boot-dev-no
-
-: boot-selected
-   1 to my-boot-dev
-   BEGIN parse-word dup WHILE
-      boot-dev-no my-boot-dev = IF
-         s" boot " 2swap $cat
-         ['] evaluate catch ?dup IF     \ and execute it
-            ." boot attempt returned: "
-            abort"-str @ count type cr
-            throw
-         THEN
-         0 0 load-list 2!
-         UNLOOP EXIT
-      ELSE
-         2drop
-      THEN
-      my-boot-dev 1 + to my-boot-dev
-   REPEAT 2drop 0 0 load-list 2!
-
-   (boot)
-;
-
-: boot-start
-   \ Remove multiple F12 key presses if any
-   BEGIN key? WHILE
-      key drop
-   REPEAT
-
-   decimal
-   BEGIN parse-word dup WHILE
-      my-boot-dev (u.) s" . " $cat type 2dup type ." : " de-alias type cr
-      my-boot-dev 1 + to my-boot-dev
-   REPEAT 2drop 0 0 load-list 2!
-
-   cr BEGIN KEY dup emit
-      dup isdigit IF
-         dup 30 - to digit-val
-         boot-dev-no a * digit-val + to boot-dev-no
-      THEN
-   d = UNTIL
-
-   boot-dev-no my-boot-dev < IF
-      s" boot-selected " s" $bootdev" evaluate $cat strdup evaluate
-   ELSE
-      ." Invalid choice!" cr
-   THEN
-   hex
-;
 
 : boot-menu-start
-   ." Select boot device:" cr cr
-   s" boot-start " s" $bootdev" evaluate $cat strdup evaluate
+    boot-menu ?dup IF
+       s" boot " 2swap $cat
+       ['] evaluate catch ?dup IF
+           ." boot attempt returned: "
+           abort"-str @ count type cr
+           throw
+       THEN
+       0 0 load-list 2!
+    THEN
 ;
 
 : boot-menu-enabled? ( -- true|false )

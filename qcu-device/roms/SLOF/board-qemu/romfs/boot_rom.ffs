@@ -17,4 +17,3 @@ stage1		board-qemu/llfw/stage1.bin	1			0x100
 xvect		slof/xvect.bin			0			0
 ofw_main	board-qemu/slof/paflof		0			0
 bootinfo	board-qemu/llfw/Cboot.bin	0			0
-snk		clients/net-snk.client		0			0

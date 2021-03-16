@@ -40,6 +40,10 @@
 \ PC87417.pdf page 156 (chapter 8.3.15) - RTC Control Register C
 00 0c rtc!
 
+: bcd-to-bin  ( bcd -- bin )
+   dup f and swap 4 rshift a * +
+;
+
 \ read from the rtc and do the bcd-to-bin conversion
 : rtc-bin@  ( offset -- value )
    rtc@ bcd-to-bin

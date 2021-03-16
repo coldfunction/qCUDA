@@ -14,10 +14,12 @@
  * GNU General Public License for more details.
  */
 
+#include "qemu/osdep.h"
 #include "net/eth.h"
+#include "qapi/error.h"
+#include "qapi/qapi-commands-rocker.h"
 #include "qemu/iov.h"
 #include "qemu/timer.h"
-#include "qmp-commands.h"
 
 #include "rocker.h"
 #include "rocker_hw.h"
@@ -102,9 +104,8 @@ typedef struct of_dpa_flow_key {
 
 /* Width of key which includes field 'f' in u64s, rounded up */
 #define FLOW_KEY_WIDTH(f) \
-    ((offsetof(OfDpaFlowKey, f) + \
-      sizeof(((OfDpaFlowKey *)0)->f) + \
-      sizeof(uint64_t) - 1) / sizeof(uint64_t))
+    DIV_ROUND_UP(offsetof(OfDpaFlowKey, f) + sizeof(((OfDpaFlowKey *)0)->f), \
+    sizeof(uint64_t))
 
 typedef struct of_dpa_flow_action {
     uint32_t goto_tbl;
@@ -367,10 +368,7 @@ static OfDpaFlow *of_dpa_flow_alloc(uint64_t cookie)
     OfDpaFlow *flow;
     int64_t now = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) / 1000;
 
-    flow = g_malloc0(sizeof(OfDpaFlow));
-    if (!flow) {
-        return NULL;
-    }
+    flow = g_new0(OfDpaFlow, 1);
 
     flow->cookie = cookie;
     flow->mask.tbl_id = 0xffffffff;
@@ -811,11 +809,7 @@ static int of_dpa_group_get_stats(OfDpa *of_dpa, uint32_t id)
 
 static OfDpaGroup *of_dpa_group_alloc(uint32_t id)
 {
-    OfDpaGroup *group = g_malloc0(sizeof(OfDpaGroup));
-
-    if (!group) {
-        return NULL;
-    }
+    OfDpaGroup *group = g_new0(OfDpaGroup, 1);
 
     group->id = id;
 
@@ -1867,9 +1861,6 @@ static int of_dpa_cmd_flow_add(OfDpa *of_dpa, uint64_t cookie,
     }
 
     flow = of_dpa_flow_alloc(cookie);
-    if (!flow) {
-        return -ROCKER_ENOMEM;
-    }
 
     err = of_dpa_cmd_flow_add_mod(of_dpa, flow, flow_tlvs);
     if (err) {
@@ -2039,19 +2030,11 @@ static int of_dpa_cmd_add_l2_flood(OfDpa *of_dpa, OfDpaGroup *group,
     group->l2_flood.group_count =
         rocker_tlv_get_le16(group_tlvs[ROCKER_TLV_OF_DPA_GROUP_COUNT]);
 
-    tlvs = g_malloc0((group->l2_flood.group_count + 1) *
-                     sizeof(RockerTlv *));
-    if (!tlvs) {
-        return -ROCKER_ENOMEM;
-    }
+    tlvs = g_new0(RockerTlv *, group->l2_flood.group_count + 1);
 
     g_free(group->l2_flood.group_ids);
     group->l2_flood.group_ids =
-        g_malloc0(group->l2_flood.group_count * sizeof(uint32_t));
-    if (!group->l2_flood.group_ids) {
-        err = -ROCKER_ENOMEM;
-        goto err_out;
-    }
+        g_new0(uint32_t, group->l2_flood.group_count);
 
     rocker_tlv_parse_nested(tlvs, group->l2_flood.group_count,
                             group_tlvs[ROCKER_TLV_OF_DPA_GROUP_IDS]);
@@ -2158,9 +2141,6 @@ static int of_dpa_cmd_group_add(OfDpa *of_dpa, uint32_t group_id,
     }
 
     group = of_dpa_group_alloc(group_id);
-    if (!group) {
-        return -ROCKER_ENOMEM;
-    }
 
     err = of_dpa_cmd_group_do(of_dpa, group_id, group, group_tlvs);
     if (err) {
@@ -2463,15 +2443,13 @@ RockerOfDpaFlowList *qmp_query_rocker_of_dpa_flows(const char *name,
 
     r = rocker_find(name);
     if (!r) {
-        error_set(errp, ERROR_CLASS_GENERIC_ERROR,
-                  "rocker %s not found", name);
+        error_setg(errp, "rocker %s not found", name);
         return NULL;
     }
 
     w = rocker_get_world(r, ROCKER_WORLD_TYPE_OF_DPA);
     if (!w) {
-        error_set(errp, ERROR_CLASS_GENERIC_ERROR,
-                  "rocker %s doesn't have OF-DPA world", name);
+        error_setg(errp, "rocker %s doesn't have OF-DPA world", name);
         return NULL;
     }
 
@@ -2598,15 +2576,13 @@ RockerOfDpaGroupList *qmp_query_rocker_of_dpa_groups(const char *name,
 
     r = rocker_find(name);
     if (!r) {
-        error_set(errp, ERROR_CLASS_GENERIC_ERROR,
-                  "rocker %s not found", name);
+        error_setg(errp, "rocker %s not found", name);
         return NULL;
     }
 
     w = rocker_get_world(r, ROCKER_WORLD_TYPE_OF_DPA);
     if (!w) {
-        error_set(errp, ERROR_CLASS_GENERIC_ERROR,
-                  "rocker %s doesn't have OF-DPA world", name);
+        error_setg(errp, "rocker %s doesn't have OF-DPA world", name);
         return NULL;
     }
 
@@ -2618,6 +2594,7 @@ RockerOfDpaGroupList *qmp_query_rocker_of_dpa_groups(const char *name,
 }
 
 static WorldOps of_dpa_ops = {
+    .name = "ofdpa",
     .init = of_dpa_init,
     .uninit = of_dpa_uninit,
     .ig = of_dpa_ig,

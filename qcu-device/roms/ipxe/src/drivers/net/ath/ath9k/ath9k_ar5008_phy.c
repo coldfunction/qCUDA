@@ -640,12 +640,14 @@ static void ar5008_hw_init_chain_masks(struct ath_hw *ah)
 	case 0x5:
 		REG_SET_BIT(ah, AR_PHY_ANALOG_SWAP,
 			    AR_PHY_SWAP_ALT_CHAIN);
+		/* Fall through */
 	case 0x3:
 		if (ah->hw_version.macVersion == AR_SREV_REVISION_5416_10) {
 			REG_WRITE(ah, AR_PHY_RX_CHAINMASK, 0x7);
 			REG_WRITE(ah, AR_PHY_CAL_CHAINMASK, 0x7);
 			break;
 		}
+		/* Fall through */
 	case 0x1:
 	case 0x2:
 	case 0x7:
@@ -1141,12 +1143,12 @@ static int ar5008_hw_ani_control_old(struct ath_hw *ah,
 			REG_CLR_BIT(ah, AR_PHY_SFCORR_LOW,
 				    AR_PHY_SFCORR_LOW_USE_SELF_CORR_LOW);
 
-		if (!on != aniState->ofdmWeakSigDetectOff) {
+		if (on != aniState->ofdmWeakSigDetect) {
 			if (on)
 				ah->stats.ast_ani_ofdmon++;
 			else
 				ah->stats.ast_ani_ofdmoff++;
-			aniState->ofdmWeakSigDetectOff = !on;
+			aniState->ofdmWeakSigDetect = on;
 		}
 		break;
 	}
@@ -1215,10 +1217,10 @@ static int ar5008_hw_ani_control_old(struct ath_hw *ah,
 
 	DBG2("ath9k: ANI parameters:\n");
 	DBG2(
-		"noiseImmunityLevel=%d, spurImmunityLevel=%d, ofdmWeakSigDetectOff=%d\n",
+		"noiseImmunityLevel=%d, spurImmunityLevel=%d, ofdmWeakSigDetect=%d\n",
 		aniState->noiseImmunityLevel,
 		aniState->spurImmunityLevel,
-		!aniState->ofdmWeakSigDetectOff);
+		aniState->ofdmWeakSigDetect);
 	DBG2(
 		"cckWeakSigThreshold=%d, firstepLevel=%d, listenTime=%d\n",
 		aniState->cckWeakSigThreshold,
@@ -1307,18 +1309,18 @@ static int ar5008_hw_ani_control_new(struct ath_hw *ah,
 			REG_CLR_BIT(ah, AR_PHY_SFCORR_LOW,
 				    AR_PHY_SFCORR_LOW_USE_SELF_CORR_LOW);
 
-		if (!on != aniState->ofdmWeakSigDetectOff) {
+		if (on != aniState->ofdmWeakSigDetect) {
 			DBG2("ath9k: "
 				"** ch %d: ofdm weak signal: %s=>%s\n",
 				chan->channel,
-				!aniState->ofdmWeakSigDetectOff ?
+				aniState->ofdmWeakSigDetect ?
 				"on" : "off",
 				on ? "on" : "off");
 			if (on)
 				ah->stats.ast_ani_ofdmon++;
 			else
 				ah->stats.ast_ani_ofdmoff++;
-			aniState->ofdmWeakSigDetectOff = !on;
+			aniState->ofdmWeakSigDetect = on;
 		}
 		break;
 	}
@@ -1467,7 +1469,7 @@ static int ar5008_hw_ani_control_new(struct ath_hw *ah,
 	DBG2("ath9k: "
 		"ANI parameters: SI=%d, ofdmWS=%s FS=%d MRCcck=%s listenTime=%d ofdmErrs=%d cckErrs=%d\n",
 		aniState->spurImmunityLevel,
-		!aniState->ofdmWeakSigDetectOff ? "on" : "off",
+		aniState->ofdmWeakSigDetect ? "on" : "off",
 		aniState->firstepLevel,
 		!aniState->mrcCCKOff ? "on" : "off",
 		aniState->listenTime,
@@ -1554,7 +1556,7 @@ static void ar5008_hw_ani_cache_ini_regs(struct ath_hw *ah)
 	/* these levels just got reset to defaults by the INI */
 	aniState->spurImmunityLevel = ATH9K_ANI_SPUR_IMMUNE_LVL_NEW;
 	aniState->firstepLevel = ATH9K_ANI_FIRSTEP_LVL_NEW;
-	aniState->ofdmWeakSigDetectOff = !ATH9K_ANI_USE_OFDM_WEAK_SIG;
+	aniState->ofdmWeakSigDetect = ATH9K_ANI_USE_OFDM_WEAK_SIG;
 	aniState->mrcCCKOff = 1; /* not available on pre AR9003 */
 }
 

@@ -6,7 +6,13 @@ if [ -z "$CC" ]; then
     CC=gcc
 fi
 
+# stat differs between platforms
+if [ -z "$STATSZ" ]; then
+	STATSZ="stat -c %s"
+fi
+
 export QUIET_TEST=1
+STOP_ON_FAIL=0
 
 export VALGRIND=
 VGCODE=126
@@ -24,6 +30,9 @@ base_run_test() {
 	tot_pass=$((tot_pass + 1))
     else
 	ret="$?"
+	if [ "$STOP_ON_FAIL" -eq 1 ]; then
+	    exit 1
+	fi
 	if [ "$ret" -eq 1 ]; then
 	    tot_config=$((tot_config + 1))
 	elif [ "$ret" -eq 2 ]; then
@@ -38,20 +47,20 @@ base_run_test() {
 
 shorten_echo () {
     limit=32
-    echo -n "$1"
+    printf "$1"
     shift
     for x; do
 	if [ ${#x} -le $limit ]; then
-	    echo -n " $x"
+	    printf " $x"
 	else
 	    short=$(echo "$x" | head -c$limit)
-	    echo -n " \"$short\"...<${#x} bytes>"
+	    printf " \"$short\"...<${#x} bytes>"
 	fi
     done
 }
 
 run_test () {
-    echo -n "$@:	"
+    printf "$*:	"
     if [ -n "$VALGRIND" -a -f $1.supp ]; then
 	VGSUPP="--suppressions=$1.supp"
     fi
@@ -59,7 +68,7 @@ run_test () {
 }
 
 run_sh_test () {
-    echo -n "$@:	"
+    printf "$*:	"
     base_run_test sh "$@"
 }
 
@@ -102,12 +111,27 @@ wrap_error () {
 
 run_wrap_error_test () {
     shorten_echo "$@"
-    echo -n " {!= 0}:	"
+    printf " {!= 0}:	"
     base_run_test wrap_error "$@"
 }
 
+# $1: dtb file
+# $2: align base
+check_align () {
+    shorten_echo "check_align $@:	"
+    local size=$($STATSZ "$1")
+    local align="$2"
+    (
+	if [ $(($size % $align)) -eq 0 ] ;then
+	    PASS
+	else
+	    FAIL "Output size $size is not $align-byte aligned"
+	fi
+    )
+}
+
 run_dtc_test () {
-    echo -n "dtc $@:	"
+    printf "dtc $*:	"
     base_run_test wrap_test $VALGRIND $DTC "$@"
 }
 
@@ -122,7 +146,7 @@ asm_to_so_test () {
 run_fdtget_test () {
     expect="$1"
     shift
-    echo -n "fdtget-runtest.sh "$expect" $@:	"
+    printf "fdtget-runtest.sh %s $*:	" "$(echo $expect)"
     base_run_test sh fdtget-runtest.sh "$expect" "$@"
 }
 
@@ -130,8 +154,102 @@ run_fdtput_test () {
     expect="$1"
     shift
     shorten_echo fdtput-runtest.sh "$expect" "$@"
-    echo -n ":	"
+    printf ":	"
     base_run_test sh fdtput-runtest.sh "$expect" "$@"
+}
+
+run_fdtdump_test() {
+    file="$1"
+    shorten_echo fdtdump-runtest.sh "$file"
+    printf ":	"
+    base_run_test sh fdtdump-runtest.sh "$file" 2>/dev/null
+}
+
+run_fdtoverlay_test() {
+    expect="$1"
+    shift
+    shorten_echo fdtoverlay-runtest.sh "$expect" "$@"
+    printf ":	"
+    base_run_test sh fdtoverlay-runtest.sh "$expect" "$@"
+}
+
+BAD_FIXUP_TREES="bad_index \
+		empty \
+		empty_index \
+		index_trailing \
+		path_empty_prop \
+		path_only \
+		path_only_sep \
+		path_prop"
+
+# Test to exercise libfdt overlay application without dtc's overlay support
+libfdt_overlay_tests () {
+    # First test a doctored overlay which requires only local fixups
+    run_dtc_test -I dts -O dtb -o overlay_base_no_symbols.test.dtb overlay_base.dts
+    run_test check_path overlay_base_no_symbols.test.dtb not-exists "/__symbols__"
+    run_test check_path overlay_base_no_symbols.test.dtb not-exists "/__fixups__"
+    run_test check_path overlay_base_no_symbols.test.dtb not-exists "/__local_fixups__"
+
+    run_dtc_test -I dts -O dtb -o overlay_overlay_no_fixups.test.dtb overlay_overlay_no_fixups.dts
+    run_test check_path overlay_overlay_no_fixups.test.dtb not-exists "/__symbols__"
+    run_test check_path overlay_overlay_no_fixups.test.dtb not-exists "/__fixups__"
+    run_test check_path overlay_overlay_no_fixups.test.dtb exists "/__local_fixups__"
+
+    run_test overlay overlay_base_no_symbols.test.dtb overlay_overlay_no_fixups.test.dtb
+
+    # Then test with manually constructed fixups
+    run_dtc_test -I dts -O dtb -o overlay_base_manual_symbols.test.dtb overlay_base_manual_symbols.dts
+    run_test check_path overlay_base_manual_symbols.test.dtb exists "/__symbols__"
+    run_test check_path overlay_base_manual_symbols.test.dtb not-exists "/__fixups__"
+    run_test check_path overlay_base_manual_symbols.test.dtb not-exists "/__local_fixups__"
+
+    run_dtc_test -I dts -O dtb -o overlay_overlay_manual_fixups.test.dtb overlay_overlay_manual_fixups.dts
+    run_test check_path overlay_overlay_manual_fixups.test.dtb not-exists "/__symbols__"
+    run_test check_path overlay_overlay_manual_fixups.test.dtb exists "/__fixups__"
+    run_test check_path overlay_overlay_manual_fixups.test.dtb exists "/__local_fixups__"
+
+    run_test overlay overlay_base_manual_symbols.test.dtb overlay_overlay_manual_fixups.test.dtb
+
+    # test simplified plugin syntax
+    run_dtc_test -@ -I dts -O dtb -o overlay_overlay_simple.dtb overlay_overlay_simple.dts
+
+    # verify non-generation of local fixups
+    run_test check_path overlay_overlay_simple.dtb not-exists "/__local_fixups__"
+
+    # Bad fixup tests
+    for test in $BAD_FIXUP_TREES; do
+	tree="overlay_bad_fixup_$test"
+	run_dtc_test -I dts -O dtb -o $tree.test.dtb $tree.dts
+	run_test overlay_bad_fixup overlay_base_no_symbols.test.dtb $tree.test.dtb
+    done
+}
+
+# Tests to exercise dtc's overlay generation support
+dtc_overlay_tests () {
+    # Overlay tests for dtc
+    run_dtc_test -@ -I dts -O dtb -o overlay_base.test.dtb overlay_base.dts
+    run_test check_path overlay_base.test.dtb exists "/__symbols__"
+    run_test check_path overlay_base.test.dtb not-exists "/__fixups__"
+    run_test check_path overlay_base.test.dtb not-exists "/__local_fixups__"
+
+    run_dtc_test -I dts -O dtb -o overlay_overlay.test.dtb overlay_overlay.dts
+    run_test check_path overlay_overlay.test.dtb not-exists "/__symbols__"
+    run_test check_path overlay_overlay.test.dtb exists "/__fixups__"
+    run_test check_path overlay_overlay.test.dtb exists "/__local_fixups__"
+
+    run_test overlay overlay_base.test.dtb overlay_overlay.test.dtb
+
+    # test plugin source to dtb and back
+    run_dtc_test -I dtb -O dts -o overlay_overlay_decompile.test.dts overlay_overlay.test.dtb
+    run_dtc_test -I dts -O dtb -o overlay_overlay_decompile.test.dtb overlay_overlay_decompile.test.dts
+    run_test dtbs_equal_ordered overlay_overlay.test.dtb overlay_overlay_decompile.test.dtb
+
+    # Test generation of aliases insted of symbols
+    run_dtc_test -A -I dts -O dtb -o overlay_base_with_aliases.dtb overlay_base.dts
+    run_test check_path overlay_base_with_aliases.dtb exists "/aliases"
+    run_test check_path overlay_base_with_aliases.dtb not-exists "/__symbols__"
+    run_test check_path overlay_base_with_aliases.dtb not-exists "/__fixups__"
+    run_test check_path overlay_base_with_aliases.dtb not-exists "/__local_fixups__"
 }
 
 tree1_tests () {
@@ -184,11 +302,25 @@ ALL_LAYOUTS="mts mst tms tsm smt stm"
 libfdt_tests () {
     tree1_tests test_tree1.dtb
 
+    run_dtc_test -I dts -O dtb -o addresses.test.dtb addresses.dts
+    run_test addr_size_cells addresses.test.dtb
+
+    run_dtc_test -I dts -O dtb -o stringlist.test.dtb stringlist.dts
+    run_test stringlist stringlist.test.dtb
+
     # Sequential write tests
     run_test sw_tree1
     tree1_tests sw_tree1.test.dtb
     tree1_tests unfinished_tree1.test.dtb
     run_test dtbs_equal_ordered test_tree1.dtb sw_tree1.test.dtb
+
+    # Resizing tests
+    for mode in resize realloc; do
+	run_test sw_tree1 $mode
+	tree1_tests sw_tree1.test.dtb
+	tree1_tests unfinished_tree1.test.dtb
+	run_test dtbs_equal_ordered test_tree1.dtb sw_tree1.test.dtb
+    done
 
     # fdt_move tests
     for tree in test_tree1.dtb sw_tree1.test.dtb unfinished_tree1.test.dtb; do
@@ -233,6 +365,7 @@ libfdt_tests () {
     run_test appendprop2 appendprop1.test.dtb
     run_dtc_test -I dts -O dtb -o appendprop.test.dtb appendprop.dts
     run_test dtbs_equal_ordered appendprop2.test.dtb appendprop.test.dtb
+    libfdt_overlay_tests
 
     for basetree in test_tree1.dtb sw_tree1.test.dtb rw_tree1.test.dtb; do
 	run_test nopulate $basetree
@@ -244,11 +377,37 @@ libfdt_tests () {
     run_dtc_test -I dts -O dtb -o subnode_iterate.dtb subnode_iterate.dts
     run_test subnode_iterate subnode_iterate.dtb
 
+    run_dtc_test -I dts -O dtb -o property_iterate.dtb property_iterate.dts
+    run_test property_iterate property_iterate.dtb
+
     # Tests for behaviour on various sorts of corrupted trees
     run_test truncated_property
 
+    # Check aliases support in fdt_path_offset
+    run_dtc_test -I dts -O dtb -o aliases.dtb aliases.dts
+    run_test get_alias aliases.dtb
+    run_test path_offset_aliases aliases.dtb
+
     # Specific bug tests
     run_test add_subnode_with_nops
+    run_dtc_test -I dts -O dts -o sourceoutput.test.dts sourceoutput.dts
+    run_dtc_test -I dts -O dtb -o sourceoutput.test.dtb sourceoutput.dts
+    run_dtc_test -I dts -O dtb -o sourceoutput.test.dts.test.dtb sourceoutput.test.dts
+    run_test dtbs_equal_ordered sourceoutput.test.dtb sourceoutput.test.dts.test.dtb
+
+    run_dtc_test -I dts -O dtb -o embedded_nul.test.dtb embedded_nul.dts
+    run_dtc_test -I dts -O dtb -o embedded_nul_equiv.test.dtb embedded_nul_equiv.dts
+    run_test dtbs_equal_ordered embedded_nul.test.dtb embedded_nul_equiv.test.dtb
+
+    run_dtc_test -I dts -O dtb bad-size-cells.dts
+
+    run_wrap_error_test $DTC division-by-zero.dts
+    run_wrap_error_test $DTC bad-octal-literal.dts
+    run_dtc_test -I dts -O dtb nul-in-escape.dts
+    run_wrap_error_test $DTC nul-in-line-info1.dts
+    run_wrap_error_test $DTC nul-in-line-info2.dts
+
+    run_wrap_error_test $DTC -I dtb -O dts -o /dev/null ovf_size_strings.dtb
 }
 
 dtc_tests () {
@@ -280,7 +439,7 @@ dtc_tests () {
     run_dtc_test -I dts -O dtb -o dtc_path-references.test.dtb path-references.dts
     run_test path-references dtc_path-references.test.dtb
 
-    run_test phandle_format dtc_references.test.dtb both
+    run_test phandle_format dtc_references.test.dtb epapr
     for f in legacy epapr both; do
 	run_dtc_test -I dts -O dtb -H $f -o dtc_references.test.$f.dtb references.dts
 	run_test phandle_format dtc_references.test.$f.dtb $f
@@ -294,11 +453,6 @@ dtc_tests () {
     run_dtc_test -I dts -O dtb -o dtc_comments.test.dtb comments.dts
     run_dtc_test -I dts -O dtb -o dtc_comments-cmp.test.dtb comments-cmp.dts
     run_test dtbs_equal_ordered dtc_comments.test.dtb dtc_comments-cmp.test.dtb
-
-    # Check aliases support in fdt_path_offset
-    run_dtc_test -I dts -O dtb -o aliases.dtb aliases.dts
-    run_test get_alias aliases.dtb
-    run_test path_offset_aliases aliases.dtb
 
     # Check /include/ directive
     run_dtc_test -I dts -O dtb -o includes.test.dtb include0.dts
@@ -369,11 +523,14 @@ dtc_tests () {
     tree1_tests dtc_tree1_merge.test.dtb test_tree1.dtb
     run_dtc_test -I dts -O dtb -o dtc_tree1_merge_labelled.test.dtb test_tree1_merge_labelled.dts
     tree1_tests dtc_tree1_merge_labelled.test.dtb test_tree1.dtb
+    run_dtc_test -I dts -O dtb -o dtc_tree1_label_noderef.test.dtb test_tree1_label_noderef.dts
+    run_test dtbs_equal_unordered dtc_tree1_label_noderef.test.dtb test_tree1.dtb
     run_dtc_test -I dts -O dtb -o multilabel_merge.test.dtb multilabel_merge.dts
     run_test references multilabel.test.dtb
     run_test dtbs_equal_ordered multilabel.test.dtb multilabel_merge.test.dtb
     run_dtc_test -I dts -O dtb -o dtc_tree1_merge_path.test.dtb test_tree1_merge_path.dts
     tree1_tests dtc_tree1_merge_path.test.dtb test_tree1.dtb
+    run_wrap_error_test $DTC -I dts -O dtb -o /dev/null test_label_ref.dts
 
     # Check prop/node delete functionality
     run_dtc_test -I dts -O dtb -o dtc_tree1_delete.test.dtb test_tree1_delete.dts
@@ -394,12 +551,23 @@ dtc_tests () {
     check_tests bad-name-property.dts name_properties
 
     check_tests bad-ncells.dts address_cells_is_cell size_cells_is_cell interrupt_cells_is_cell
-    check_tests bad-string-props.dts device_type_is_string model_is_string status_is_string
+    check_tests bad-string-props.dts device_type_is_string model_is_string status_is_string label_is_string compatible_is_string_list names_is_string_list
+    check_tests bad-chosen.dts chosen_node_is_root
+    check_tests bad-chosen.dts chosen_node_bootargs
+    check_tests bad-chosen.dts chosen_node_stdout_path
     check_tests bad-reg-ranges.dts reg_format ranges_format
     check_tests bad-empty-ranges.dts ranges_format
     check_tests reg-ranges-root.dts reg_format ranges_format
     check_tests default-addr-size.dts avoid_default_addr_size
     check_tests obsolete-chosen-interrupt-controller.dts obsolete_chosen_interrupt_controller
+    check_tests reg-without-unit-addr.dts unit_address_vs_reg
+    check_tests unit-addr-without-reg.dts unit_address_vs_reg
+    check_tests unit-addr-leading-0x.dts unit_address_format
+    check_tests unit-addr-leading-0s.dts unit_address_format
+    check_tests bad-phandle-cells.dts interrupts_extended_property
+    check_tests bad-gpio.dts gpios_property
+    run_sh_test dtc-checkfails.sh deprecated_gpio_property -- -Wdeprecated_gpio_property -I dts -O dtb bad-gpio.dts
+    check_tests bad-interrupt-cells.dts interrupts_property
     run_sh_test dtc-checkfails.sh node_name_chars -- -I dtb -O dtb bad_node_char.dtb
     run_sh_test dtc-checkfails.sh node_name_format -- -I dtb -O dtb bad_node_format.dtb
     run_sh_test dtc-checkfails.sh prop_name_chars -- -I dtb -O dtb bad_prop_char.dtb
@@ -410,6 +578,13 @@ dtc_tests () {
     run_sh_test dtc-checkfails.sh duplicate_label -- -I dts -O dtb reuse-label4.dts
     run_sh_test dtc-checkfails.sh duplicate_label -- -I dts -O dtb reuse-label5.dts
     run_sh_test dtc-checkfails.sh duplicate_label -- -I dts -O dtb reuse-label6.dts
+
+    run_test check_path test_tree1.dtb exists "/subnode@1"
+    run_test check_path test_tree1.dtb not-exists "/subnode@10"
+
+    check_tests pci-bridge-ok.dts -n pci_bridge
+    check_tests pci-bridge-bad1.dts pci_bridge
+    check_tests pci-bridge-bad2.dts pci_bridge
 
     # Check warning options
     run_sh_test dtc-checkfails.sh address_cells_is_cell interrupt_cells_is_cell -n size_cells_is_cell -- -Wno_size_cells_is_cell -I dts -O dtb bad-ncells.dts
@@ -453,6 +628,19 @@ dtc_tests () {
 	-o search_paths_b.dtb search_paths_b.dts
     run_dtc_test -I dts -O dtb -o search_paths_subdir.dtb \
 	search_dir_b/search_paths_subdir.dts
+
+    # Check -a option
+    for align in 2 4 8 16 32 64; do
+	# -p -a
+	run_dtc_test -O dtb -p 1000 -a $align -o align0.dtb subnode_iterate.dts
+	check_align align0.dtb $align
+	# -S -a
+	run_dtc_test -O dtb -S 1999 -a $align -o align1.dtb subnode_iterate.dts
+	check_align align1.dtb $align
+    done
+
+    # Tests for overlay/plugin generation
+    dtc_overlay_tests
 }
 
 cmp_tests () {
@@ -534,7 +722,7 @@ fdtput_tests () {
     text=lorem.txt
 
     # Allow just enough space for $text
-    run_dtc_test -O dtb -p $(stat -c %s $text) -o $dtb $dts
+    run_dtc_test -O dtb -p $($STATSZ $text) -o $dtb $dts
 
     # run_fdtput_test <expected-result> <file> <node> <property> <flags> <value>
     run_fdtput_test "a_model" $dtb / model -ts "a_model"
@@ -553,7 +741,7 @@ fdtput_tests () {
     run_fdtput_test "$(cat $text $text)" $dtb /randomnode blob -ts "$(cat $text $text)"
 
     # Start again with a fresh dtb
-    run_dtc_test -O dtb -p $(stat -c %s $text) -o $dtb $dts
+    run_dtc_test -O dtb -p $($STATSZ $text) -o $dtb $dts
 
     # Node creation
     run_wrap_error_test $DTPUT $dtb -c /baldrick sod
@@ -580,6 +768,28 @@ fdtput_tests () {
     run_wrap_test $DTPUT $dtb -cp /chosen
     run_wrap_test $DTPUT $dtb -cp /chosen/son
 
+    # Start again with a fresh dtb
+    run_dtc_test -O dtb -p $($STATSZ $text) -o $dtb $dts
+
+    # Node delete
+    run_wrap_test $DTPUT $dtb -c /chosen/node1 /chosen/node2 /chosen/node3
+    run_fdtget_test "node3\nnode2\nnode1" $dtb -l  /chosen
+    run_wrap_test $DTPUT $dtb -r /chosen/node1 /chosen/node2
+    run_fdtget_test "node3" $dtb -l  /chosen
+
+    # Delete the non-existent node
+    run_wrap_error_test $DTPUT $dtb -r /non-existent/node
+
+    # Property delete
+    run_fdtput_test "eva" $dtb /chosen/ name "" -ts "eva"
+    run_fdtput_test "016" $dtb /chosen/ age  "" -ts "016"
+    run_fdtget_test "age\nname\nbootargs\nlinux,platform" $dtb -p  /chosen
+    run_wrap_test $DTPUT $dtb -d /chosen/ name age
+    run_fdtget_test "bootargs\nlinux,platform" $dtb -p  /chosen
+
+    # Delete the non-existent property
+    run_wrap_error_test $DTPUT $dtb -d /chosen   non-existent-prop
+
     # TODO: Add tests for verbose mode?
 }
 
@@ -587,7 +797,60 @@ utilfdt_tests () {
     run_test utilfdt_test
 }
 
-while getopts "vt:m" ARG ; do
+fdtdump_tests () {
+    run_fdtdump_test fdtdump.dts
+}
+
+fdtoverlay_tests() {
+    base=overlay_base.dts
+    basedtb=overlay_base.fdoverlay.test.dtb
+    overlay=overlay_overlay_manual_fixups.dts
+    overlaydtb=overlay_overlay_manual_fixups.fdoverlay.test.dtb
+    targetdtb=target.fdoverlay.test.dtb
+
+    run_dtc_test -@ -I dts -O dtb -o $basedtb $base
+    run_dtc_test -@ -I dts -O dtb -o $overlaydtb $overlay
+
+    # test that the new property is installed
+    run_fdtoverlay_test foobar "/test-node" "test-str-property" "-ts" ${basedtb} ${targetdtb} ${overlaydtb}
+
+    stacked_base=stacked_overlay_base.dts
+    stacked_basedtb=stacked_overlay_base.fdtoverlay.test.dtb
+    stacked_bar=stacked_overlay_bar.dts
+    stacked_bardtb=stacked_overlay_bar.fdtoverlay.test.dtb
+    stacked_baz=stacked_overlay_baz.dts
+    stacked_bazdtb=stacked_overlay_baz.fdtoverlay.test.dtb
+    stacked_targetdtb=stacked_overlay_target.fdtoverlay.test.dtb
+
+    run_dtc_test -@ -I dts -O dtb -o $stacked_basedtb $stacked_base
+    run_dtc_test -@ -I dts -O dtb -o $stacked_bardtb $stacked_bar
+    run_dtc_test -@ -I dts -O dtb -o $stacked_bazdtb $stacked_baz
+
+    # test that baz correctly inserted the property
+    run_fdtoverlay_test baz "/foonode/barnode/baznode" "baz-property" "-ts" ${stacked_basedtb} ${stacked_targetdtb} ${stacked_bardtb} ${stacked_bazdtb}
+}
+
+pylibfdt_tests () {
+    TMP=/tmp/tests.stderr.$$
+    python pylibfdt_tests.py -v 2> $TMP
+
+    # Use the 'ok' message meaning the test passed, 'ERROR' meaning it failed
+    # and the summary line for total tests (e.g. 'Ran 17 tests in 0.002s').
+    # We could add pass + fail to get total tests, but this provides a useful
+    # sanity check.
+    pass_count=$(grep "\.\.\. ok$" $TMP | wc -l)
+    fail_count=$(grep "^ERROR: " $TMP | wc -l)
+    total_tests=$(sed -n 's/^Ran \([0-9]*\) tests.*$/\1/p' $TMP)
+    cat $TMP
+    rm $TMP
+
+    # Extract the test results and add them to our totals
+    tot_fail=$((tot_fail + $fail_count))
+    tot_pass=$((tot_pass + $pass_count))
+    tot_tests=$((tot_tests + $total_tests))
+}
+
+while getopts "vt:me" ARG ; do
     case $ARG in
 	"v")
 	    unset QUIET_TEST
@@ -598,11 +861,19 @@ while getopts "vt:m" ARG ; do
 	"m")
 	    VALGRIND="valgrind --tool=memcheck -q --error-exitcode=$VGCODE"
 	    ;;
+	"e")
+	    STOP_ON_FAIL=1
+	    ;;
     esac
 done
 
 if [ -z "$TESTSETS" ]; then
-    TESTSETS="libfdt utilfdt dtc dtbs_equal fdtget fdtput"
+    TESTSETS="libfdt utilfdt dtc dtbs_equal fdtget fdtput fdtdump fdtoverlay"
+
+    # Test pylibfdt if the libfdt Python module is available.
+    if [ -f ../pylibfdt/_libfdt.so ]; then
+        TESTSETS="$TESTSETS pylibfdt"
+    fi
 fi
 
 # Make sure we don't have stale blobs lying around
@@ -628,6 +899,15 @@ for set in $TESTSETS; do
 	"fdtput")
 	    fdtput_tests
 	    ;;
+	"fdtdump")
+	    fdtdump_tests
+	    ;;
+	"pylibfdt")
+	    pylibfdt_tests
+	    ;;
+        "fdtoverlay")
+	    fdtoverlay_tests
+	    ;;
     esac
 done
 
@@ -642,3 +922,4 @@ fi
 echo "* Strange test result:	$tot_strange"
 echo "**********"
 
+[ "$tot_tests" -eq "$tot_pass" ] || exit 1

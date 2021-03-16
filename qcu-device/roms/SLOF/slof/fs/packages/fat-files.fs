@@ -18,6 +18,7 @@ INSTANCE VARIABLE sectors/cluster
 INSTANCE VARIABLE #reserved-sectors
 INSTANCE VARIABLE #fats
 INSTANCE VARIABLE #root-entries
+INSTANCE VARIABLE fat32-root-cluster
 INSTANCE VARIABLE total-#sectors
 INSTANCE VARIABLE media-descriptor
 INSTANCE VARIABLE sectors/fat
@@ -59,9 +60,26 @@ INSTANCE VARIABLE next-cluster
 : read-cluster ( cluster# -- )
   dup bytes/cluster @ * cluster-offset @ + bytes/cluster @ read-data
   read-fat dup #clusters @ >= IF drop 0 THEN next-cluster ! ;
+
 : read-dir ( cluster# -- )
-  ?dup 0= IF root-offset @ #root-entries @ 20 * read-data 0 next-cluster !
-  ELSE read-cluster THEN ;
+    ?dup 0= IF
+        #root-entries @ 0= IF
+            fat32-root-cluster @ read-cluster
+        ELSE
+            root-offset @ #root-entries @ 20 * read-data 0 next-cluster !
+        THEN
+    ELSE
+        read-cluster
+    THEN
+;
+
+\ Read cluster# from directory entry (handle FAT32 extension)
+: get-cluster ( direntry -- cluster# )
+  fat-type @ 20 = IF
+    dup 14 + 2c@ bwjoin 10 lshift
+  ELSE 0 THEN
+  swap 1a + 2c@ bwjoin +
+;
 
 : .time ( x -- )
   base @ >r decimal
@@ -77,7 +95,7 @@ INSTANCE VARIABLE next-cluster
   dup 0b + c@ 8 and IF drop EXIT THEN \ volume label, not a file
   dup c@ e5 = IF drop EXIT THEN \ deleted file
   cr
-  dup 1a + 2c@ bwjoin [char] # emit 4 0.r space \ starting cluster
+  dup get-cluster [char] # emit 8 0.r space \ starting cluster
   dup 18 + 2c@ bwjoin .date space
   dup 16 + 2c@ bwjoin .time space
   dup 1c + 4c@ bljoin base @ decimal swap a .r base ! space \ size in bytes
@@ -104,7 +122,8 @@ CREATE dos-name b allot
 : (find-file) ( -- cluster file-len is-dir? true | false )
   data @ BEGIN dup data @ #data @ + < WHILE
   dup dos-name b comp WHILE 20 + REPEAT
-  dup 1a + 2c@ bwjoin swap dup 1c + 4c@ bljoin swap 0b + c@ 10 and 0<> true
+  dup get-cluster
+  swap dup 1c + 4c@ bljoin swap 0b + c@ 10 and 0<> true
   ELSE drop false THEN ;
 : find-file ( dir-cluster name len -- cluster file-len is-dir? true | false )
   make-dos-name read-dir BEGIN (find-file) 0= WHILE next-cluster @ WHILE
@@ -137,6 +156,7 @@ CREATE dos-name b allot
 
   \ For FAT32:
   sectors/fat @ 0= IF data @ 24 + 4c@ bljoin sectors/fat ! THEN
+  #root-entries @ 0= IF data @ 2c + 4c@ bljoin ELSE 0 THEN fat32-root-cluster !
 
   \ XXX add other FAT32 stuff (offsets 28, 2c, 30)
 
