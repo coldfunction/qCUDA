@@ -11,22 +11,21 @@ libcudart_dl:
 
 libcudart:
 	gcc -c -Wall -Werror -fpic -I$(CUDA_INC) $(LIB).c
-	gcc -shared -o libcudart.so $(LIB).o
+	gcc -shared -Wl,--version-script=shared.version -o libcudart.so.9.0 $(LIB).o
 
 lib: $(LIB)
 
 install: 
-	sudo cp libcudart.so /usr/local/lib/
-	sudo ln -sf libcudart.so /usr/local/lib/libcudart.so.7.5
-	sudo rm -f /etc/ld.so.conf.d/cuda-7.5.conf
+	sudo cp libcudart.so.9.0 /usr/local/lib/libcudart.so.9.0
+	sudo ln -sf libcudart.so.9.0 /usr/local/lib/libcudart.so
 	sudo ldconfig
 
 clean:
-	rm -f *.so *.o 
+	rm -f *.so *.o *.so.9.0
 
 remove:
-	sudo rm -f /usr/local/lib/libcudart.so /usr/local/lib/libcudart.so.7.5
-	sudo su -c "echo "/usr/local/cuda/lib64" > /etc/ld.so.conf.d/cuda-7.5.conf"
+	sudo rm -f /usr/local/lib/libcudart.so /usr/local/lib/libcudart.so.9.0
+	sudo su -c "echo "/usr/local/cuda/lib64" > /etc/ld.so.conf.d/cuda-9.0.conf"
 	sudo ldconfig
 
 #/usr/local/cuda/bin/nvcc --cudart=shared $(USR).c
