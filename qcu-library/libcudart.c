@@ -84,9 +84,8 @@ void close_device() {
 }
 
 void send_cmd_to_device(int cmd, VirtioQCArg *arg) {
-//	if(__builtin_expect(!!(fd==-1), 0))
-//		open_device();
-
+	if(__builtin_expect(!!(fd==-1), 0))
+		open_device();
     ioctl(fd, cmd, arg);
 }
 

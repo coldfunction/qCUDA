@@ -25,7 +25,7 @@
 #include "qcuda_common.h"
 
 #if 0
-#define pfunc() printk("### %s : %d\n", __func__, __LINE__)
+#define pfunc() printk(KERN_WARNING "qcuda_driver info: %s : %d\n", __func__, __LINE__)
 #else
 #define pfunc()
 #endif
@@ -39,7 +39,7 @@
 
 
 #define error(fmt, arg...) \
-    printk("### func= %-30s ,line= %-4d ," fmt, __func__,  __LINE__, ##arg)
+    printk(KERN_ERR "### func= %-30s ,line= %-4d ," fmt, __func__,  __LINE__, ##arg)
 
 #ifndef MIN
 #define MIN(a, b) (((a)<(b))? (a):(b))
@@ -246,7 +246,6 @@ static int qcu_misc_send_cmd(VirtioQCArg *req) {
 
     err = virtqueue_add_sgs(qcu->vq, sgs, 1, 1, req, GFP_ATOMIC);
     if (err) {
-        virtqueue_kick(qcu->vq);
         error("virtqueue_add_sgs failed\n");
         goto out;
     }
@@ -867,12 +866,12 @@ static void qcummap(struct virtio_qc_mmap *priv) {
 
 void qcu_cudaHostRegister(VirtioQCArg *arg, struct virtio_qc_mmap *priv) {
     uint64_t gasp;
+    struct virtio_qc_page *group;
 
     gasp = get_gpa_array_start_phys(arg->pA, priv, arg->pASize, &(arg->pBSize));
 
 
     //fix for cudaHostGetDevicePointer start
-    struct virtio_qc_page *group;
     //TODO: if not find
     group = find_page_group(arg->pA, priv);
     priv->group = group;
@@ -1207,7 +1206,6 @@ static long qcu_misc_ioctl(struct file *filp, unsigned int _cmd, unsigned long _
 }
 
 static int qcu_misc_open(struct inode *inode, struct file *filp) {
-
     VirtioQCArg *arg;
     struct virtio_qc_mmap *priv;
     arg = kmalloc_safe(sizeof(VirtioQCArg));
@@ -1502,10 +1500,9 @@ static void qcu_virtio_remove(struct virtio_device *vdev) {
 //    if (err) {
 //        error("misc_deregister failed\n");
 //    }
-
     qcu->vdev->config->reset(qcu->vdev);
     qcu->vdev->config->del_vqs(qcu->vdev);
-    kfree(qcu->vq);
+//    kfree(qcu->vq);  // the 'del_vqs' will kfree the qcu->vq
     kfree(qcu);
 }
 
@@ -1543,8 +1540,7 @@ static void __exit fini(void) {
 module_init(init);
 module_exit(fini);
 
-MODULE_DEVICE_TABLE(virtio, id_table
-);
+MODULE_DEVICE_TABLE(virtio, id_table);
 MODULE_DESCRIPTION("Qemu Virtio qCUdriver");
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Yu-Shiang Lin");
