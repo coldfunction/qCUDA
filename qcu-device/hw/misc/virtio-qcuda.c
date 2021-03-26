@@ -97,8 +97,8 @@ typedef struct cudaDev
     int kernelsLoaded;
 }cudaDev;
 
-int totalDevices;
-cudaDev *cudaDevices;
+int totalDevices = -1;
+cudaDev *cudaDevices = NULL;
 cudaDev zeroedDevice;
 kernelInfo devicesKernels[cudaFunctionMaxNum];
 
@@ -136,7 +136,7 @@ static void loadModuleKernels(int devId, void *fBin, char *fName,  uint32_t fId,
     cuError( cuModuleLoadData( &cudaDevices[devId].module, fBin ));
     cuError( cuModuleGetFunction(&cudaDevices[devId].cudaFunction[fNum],
                                     cudaDevices[devId].module, fName) );
-     cudaDevices[devId].cudaFunctionId[fNum] = fId;
+    cudaDevices[devId].cudaFunctionId[fNum] = fId;
     cudaDevices[devId].kernelsLoaded = 1;
 }
 
@@ -152,8 +152,7 @@ static void reloadAllKernels(unsigned int id)
         fb = devicesKernels[i].fatBin;
         fn = devicesKernels[i].functionName;
         fId = devicesKernels[i].funcId;
-
-         loadModuleKernels( cudaDeviceCurrent[id], fb, fn, fId, i );
+        loadModuleKernels( cudaDeviceCurrent[id], fb, fn, fId, i );
     }
 }
 
@@ -284,6 +283,7 @@ static void qcu_cudaUnregisterFatBinary(VirtioQCArg *arg)
         }
     }
     free(cudaDevices);
+    totalDevices = -1;
 }
 
 static void qcu_cudaRegisterFunction(VirtioQCArg *arg)
@@ -671,11 +671,12 @@ static void qcu_cudaGetDeviceCount(VirtioQCArg *arg)
     int device;
     pfunc();
 
-    unsigned int id;
-    id = getCurrentID((unsigned int)arg->rnd);
-    // in case cudaReset was the previous call
-    initializeDevice(id);
-
+    if (likely(totalDevices!=-1) ){
+        unsigned int id;
+        id = getCurrentID((unsigned int)arg->rnd);
+        // in case cudaReset was the previous call
+        initializeDevice(id);
+    }
     cudaError((err = cudaGetDeviceCount( &device )));
     arg->cmd = err;
     arg->pA  = (uint64_t)device;
@@ -691,6 +692,8 @@ static void qcu_cudaSetDevice(VirtioQCArg *arg)
 
     pfunc();
 
+    if (unlikely(totalDevices==-1) )
+        qcu_cudaRegisterFatBinary(NULL);
 
     device = (int)arg->pA;
     id     = getCurrentID((unsigned int)arg->rnd);
@@ -1219,12 +1222,41 @@ static int qcu_cmd_mmaprelease(VirtioQCArg *arg) {
 }
 
 static void virtio_qcuda_cmd_handle(VirtIODevice *vdev, VirtQueue *vq) {
-    VirtQueueElement elem;
-    VirtioQCArg *arg;
+    static const size_t argSize = sizeof(VirtioQCArg);
+    VirtQueueElement *elem = NULL;
+    VirtioQCArg *arg = NULL;
+    size_t s;
+    struct iovec *in_iov;
+    struct iovec *out_iov;
+    unsigned in_num;
+    unsigned out_num;
 
-    arg = malloc(sizeof(VirtioQCArg));
-    while (virtqueue_pop(vq, &elem)) {
-        iov_to_buf(elem.out_sg, elem.out_num, 0, arg, sizeof(VirtioQCArg));
+    arg = malloc(argSize); // alloc memory for arg
+    if (unlikely(!arg)) {
+        error("malloc for VirtioQCArg fail\n");
+        return;
+    }
+
+    while ( elem=virtqueue_pop(vq, sizeof(VirtQueueElement)) ) {
+        if (elem->out_num < 1 || elem->in_num < 1) {
+            virtio_error(vdev, "virtio-qcuda VirtioQCArg missing headers");
+            virtqueue_detach_element(vq, elem, 0);
+            g_free(elem);
+            break;
+        }
+
+        out_num = elem->out_num;
+        out_iov = elem->out_sg;
+        in_num = elem->in_num;
+        in_iov = elem->in_sg;
+        s = iov_to_buf(out_iov, out_num, 0, arg, argSize);
+        if (unlikely(s != argSize)) {
+            virtio_error(vdev, "virtio-qcuda VirtioQCArg size too short");
+            virtqueue_detach_element(vq, elem, 0);
+            g_free(elem);
+            break;
+        }
+        iov_discard_front(&out_iov, &out_num, argSize);
 
         switch (arg->cmd) {
             case VIRTQC_CMD_WRITE:
@@ -1427,9 +1459,16 @@ static void virtio_qcuda_cmd_handle(VirtIODevice *vdev, VirtQueue *vq) {
                 error("unknow cmd= %d\n", arg->cmd);
         }
 
-        iov_from_buf(elem.in_sg, elem.in_num, 0, arg, sizeof(VirtioQCArg));
-        virtqueue_push(vq, &elem, sizeof(VirtioQCArg));
+        s = iov_from_buf(in_iov, in_num, 0, arg, argSize);
+        if (unlikely(s != argSize)) {
+            virtio_error(vdev, "virtio-qcuda virtioQCArg incorrect");
+            virtqueue_detach_element(vq, elem, 0);
+            break;
+        }
+
+        virtqueue_push(vq, elem, argSize);
         virtio_notify(vdev, vq);
+        g_free(elem);
     }
     free(arg);
 }

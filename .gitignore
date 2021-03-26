@@ -8,3 +8,4 @@ cscope.*
 *.log
 *.status
 */build/*
+*/build/.*

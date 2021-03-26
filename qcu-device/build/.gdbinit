@@ -1,1 +1,1 @@
-/home/yb/code/qCUDA/qcu-device/.gdbinit
+/home/yb/OneDrive/vgpu/code/qCUDA/qcu-device/.gdbinit
