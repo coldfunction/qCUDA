@@ -89,7 +89,17 @@ enum {
 
     VIRTQC_cudaDeviceCanAccessPeer,
     VIRTQC_cudaFuncGetAttributes,
-    VIRTQC_cudaFuncSetAttribute
+    VIRTQC_cudaFuncSetAttribute,
+    VIRTQC_cudaFuncSetCacheConfig,
+    VIRTQC_cudaFuncSetSharedMemConfig,
+    VIRTQC_cudaProfilerInitialize,
+    VIRTQC_cudaProfilerStart,
+    VIRTQC_cudaProfilerStop,
+    VIRTQC_cudaGetErrorName,
+    VIRTQC_cudaPeekAtLastError,
+    VIRTQC_cudaMemGetInfo,
+    VIRTQC_cudaDeviceSetCacheConfig,
+    VIRTQC_cudaDeviceGetAttribute
 };
 
 typedef struct VirtioQCArg VirtioQCArg;

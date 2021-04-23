@@ -967,3 +967,84 @@ cudaError_t cudaFuncSetAttribute(const void *func, enum cudaFuncAttribute attr, 
     send_cmd_to_device(VIRTQC_cudaFuncSetAttribute, &arg);
     return (cudaError_t) arg.cmd;
 }
+
+cudaError_t cudaFuncSetCacheConfig(const void *func, enum cudaFuncCache cacheConfig) {
+    VirtioQCArg arg;
+    memset(&arg, 0, sizeof(VirtioQCArg));
+    ptr(arg.pA, func, 0);
+    arg.pB = cacheConfig;
+    send_cmd_to_device(VIRTQC_cudaFuncSetCacheConfig, &arg);
+    return (cudaError_t) arg.cmd;
+}
+
+cudaError_t cudaFuncSetSharedMemConfig(const void *func, enum cudaSharedMemConfig config) {
+    VirtioQCArg arg;
+    memset(&arg, 0, sizeof(VirtioQCArg));
+    ptr(arg.pA, func, 0);
+    arg.pB = config;
+    send_cmd_to_device(VIRTQC_cudaFuncSetSharedMemConfig, &arg);
+    return (cudaError_t) arg.cmd;
+}
+
+cudaError_t cudaProfilerInitialize(const char *configFile, const char *outputFile, cudaOutputMode_t outputMode) {
+    VirtioQCArg arg;
+    memset(&arg, 0, sizeof(VirtioQCArg));
+    ptr(arg.pA, configFile, 0);
+    ptr(arg.pB, outputFile, 0);
+    arg.rnd = outputMode;
+    send_cmd_to_device(VIRTQC_cudaProfilerInitialize, &arg);
+    return (cudaError_t) arg.cmd;
+}
+
+cudaError_t cudaProfilerStart(void) {
+    VirtioQCArg arg;
+    memset(&arg, 0, sizeof(VirtioQCArg));
+    send_cmd_to_device(VIRTQC_cudaProfilerStart, &arg);
+    return (cudaError_t) arg.cmd;
+}
+
+cudaError_t cudaProfilerStop(void) {
+    VirtioQCArg arg;
+    memset(&arg, 0, sizeof(VirtioQCArg));
+    send_cmd_to_device(VIRTQC_cudaProfilerStop, &arg);
+    return (cudaError_t) arg.cmd;
+}
+
+const char *cudaGetErrorName(cudaError_t error) {
+    return "Not yet implement";
+}
+
+cudaError_t cudaPeekAtLastError(void) {
+    VirtioQCArg arg;
+    memset(&arg, 0, sizeof(VirtioQCArg));
+    send_cmd_to_device(VIRTQC_cudaPeekAtLastError, &arg);
+    return (cudaError_t) arg.cmd;
+}
+
+cudaError_t cudaMemGetInfo(size_t *free, size_t *total) {
+    VirtioQCArg arg;
+    memset(&arg, 0, sizeof(VirtioQCArg));
+    ptr(arg.pA, free, 0);
+    ptr(arg.pB, total, 0);
+    send_cmd_to_device(VIRTQC_cudaMemGetInfo, &arg);
+    return (cudaError_t) arg.cmd;
+}
+
+cudaError_t cudaDeviceSetCacheConfig(enum cudaFuncCache cacheConfig) {
+    VirtioQCArg arg;
+    memset(&arg, 0, sizeof(VirtioQCArg));
+    arg.pA = cacheConfig;
+    send_cmd_to_device(VIRTQC_cudaDeviceSetCacheConfig, &arg);
+    return (cudaError_t) arg.cmd;
+}
+
+cudaError_t cudaDeviceGetAttribute(int *value, enum cudaDeviceAttr attr, int device) {
+    VirtioQCArg arg;
+    memset(&arg, 0, sizeof(VirtioQCArg));
+    ptr(arg.pA, value, 0);
+    arg.pB = attr;
+    arg.rnd = device;
+    send_cmd_to_device(VIRTQC_cudaDeviceGetAttribute, &arg);
+    return (cudaError_t) arg.cmd;
+}
+

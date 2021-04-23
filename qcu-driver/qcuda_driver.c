@@ -748,6 +748,37 @@ void qcu_cudaFuncSetAttribute(VirtioQCArg *arg) {
     qcu_misc_send_cmd(arg);
 }
 
+void qcu_cudaFuncSetCacheConfig(VirtioQCArg *arg){
+    qcu_misc_send_cmd(arg);
+}
+void qcu_cudaFuncSetSharedMemConfig(VirtioQCArg *arg){
+    qcu_misc_send_cmd(arg);
+}
+void qcu_cudaProfilerInitialize(VirtioQCArg *arg){
+    qcu_misc_send_cmd(arg);
+}
+void qcu_cudaProfilerStart(VirtioQCArg *arg){
+    qcu_misc_send_cmd(arg);
+}
+void qcu_cudaProfilerStop(VirtioQCArg *arg){
+    qcu_misc_send_cmd(arg);
+}
+void qcu_cudaGetErrorName(VirtioQCArg *arg){
+    qcu_misc_send_cmd(arg);
+}
+void qcu_cudaPeekAtLastError(VirtioQCArg *arg){
+    qcu_misc_send_cmd(arg);
+}
+void qcu_cudaMemGetInfo(VirtioQCArg *arg){
+    qcu_misc_send_cmd(arg);
+}
+void qcu_cudaDeviceSetCacheConfig(VirtioQCArg *arg){
+    qcu_misc_send_cmd(arg);
+}
+void qcu_cudaDeviceGetAttribute(VirtioQCArg *arg){
+    qcu_misc_send_cmd(arg);
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 ///	basic function
@@ -1217,6 +1248,36 @@ static long qcu_misc_ioctl(struct file *filp, unsigned int _cmd, unsigned long _
             break;
         case VIRTQC_cudaFuncSetAttribute:
             qcu_cudaFuncSetAttribute(arg);
+            break;
+        case VIRTQC_cudaFuncSetCacheConfig:
+            qcu_cudaFuncSetCacheConfig(arg);
+            break;
+        case VIRTQC_cudaFuncSetSharedMemConfig:
+            qcu_cudaFuncSetSharedMemConfig(arg);
+            break;
+        case VIRTQC_cudaProfilerInitialize:
+            qcu_cudaProfilerInitialize(arg);
+            break;
+        case VIRTQC_cudaProfilerStart:
+            qcu_cudaProfilerStart(arg);
+            break;
+        case VIRTQC_cudaProfilerStop:
+            qcu_cudaProfilerStop(arg);
+            break;
+        case VIRTQC_cudaGetErrorName:
+            qcu_cudaGetErrorName(arg);
+            break;
+        case VIRTQC_cudaPeekAtLastError:
+            qcu_cudaPeekAtLastError(arg);
+            break;
+        case VIRTQC_cudaMemGetInfo:
+            qcu_cudaMemGetInfo(arg);
+            break;
+        case VIRTQC_cudaDeviceSetCacheConfig:
+            qcu_cudaDeviceSetCacheConfig(arg);
+            break;
+        case VIRTQC_cudaDeviceGetAttribute:
+            qcu_cudaDeviceGetAttribute(arg);
             break;
 
         default:

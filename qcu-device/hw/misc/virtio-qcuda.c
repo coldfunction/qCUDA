@@ -14,6 +14,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <builtin_types.h>
+#include <cuda_profiler_api.h>
 
 #endif
 
@@ -973,6 +974,68 @@ static void qcu_cudaFuncSetAttribute(VirtioQCArg *arg) {
     arg->cmd = err;
 }
 
+static void qcu_cudaFuncSetCacheConfig(VirtioQCArg *arg) {
+    cudaError_t err;
+    cudaError(err = cudaFuncSetCacheConfig((const void *) arg->pA, (enum cudaFuncCache) arg->pB));
+    arg->cmd = err;
+}
+
+static void qcu_cudaFuncSetSharedMemConfig(VirtioQCArg *arg) {
+    cudaError_t err;
+    cudaError(err = cudaFuncSetSharedMemConfig((const void *) arg->pA, (enum cudaSharedMemConfig) arg->pB));
+    arg->cmd = err;
+}
+
+static void qcu_cudaProfilerInitialize(VirtioQCArg *arg) {
+    cudaError_t err;
+    cudaError(
+            err = cudaProfilerInitialize((const char *) arg->pA, (const char *) arg->pB, (cudaOutputMode_t) arg->rnd));
+    arg->cmd = err;
+}
+
+static void qcu_cudaProfilerStart(VirtioQCArg *arg) {
+    cudaError_t err;
+    cudaError(err = cudaProfilerStart());
+    arg->cmd = err;
+}
+
+static void qcu_cudaProfilerStop(VirtioQCArg *arg) {
+    cudaError_t err;
+    cudaError(err = cudaProfilerStop());
+    arg->cmd = err;
+}
+
+static void qcu_cudaGetErrorName(VirtioQCArg *arg) {
+    cudaError_t err;
+//    cudaError(err =);
+    arg->cmd = err;
+}
+
+static void qcu_cudaPeekAtLastError(VirtioQCArg *arg) {
+    cudaError_t err;
+    cudaError(err = cudaPeekAtLastError());
+    arg->cmd = err;
+}
+
+static void qcu_cudaMemGetInfo(VirtioQCArg *arg) {
+    cudaError_t err;
+    cudaError(err = cudaMemGetInfo((size_t *) arg->pA, (size_t *) arg->pB));
+    arg->cmd = err;
+}
+
+static void qcu_cudaDeviceSetCacheConfig(VirtioQCArg *arg) {
+    cudaError_t err;
+    cudaError(err = cudaDeviceSetCacheConfig((enum cudaFuncCache) arg->pA));
+    arg->cmd = err;
+}
+
+static void qcu_cudaDeviceGetAttribute(VirtioQCArg *arg) {
+    cudaError_t err;
+    cudaError(err = cudaDeviceGetAttribute((int *) arg->pA, (enum cudaDeviceAttr) arg->pB, (int) arg->rnd));
+    arg->cmd = err;
+}
+
+
 #endif // CONFIG_CUDA
 
 static int qcu_cmd_write(VirtioQCArg *arg) {
@@ -1393,6 +1456,37 @@ static void virtio_qcuda_cmd_handle(VirtIODevice *vdev, VirtQueue *vq) {
                 break;
             case VIRTQC_cudaFuncSetAttribute:
                 qcu_cudaFuncSetAttribute(arg);
+                break;
+
+            case VIRTQC_cudaFuncSetCacheConfig:
+                qcu_cudaFuncSetCacheConfig(arg);
+                break;
+            case VIRTQC_cudaFuncSetSharedMemConfig:
+                qcu_cudaFuncSetSharedMemConfig(arg);
+                break;
+            case VIRTQC_cudaProfilerInitialize:
+                qcu_cudaProfilerInitialize(arg);
+                break;
+            case VIRTQC_cudaProfilerStart:
+                qcu_cudaProfilerStart(arg);
+                break;
+            case VIRTQC_cudaProfilerStop:
+                qcu_cudaProfilerStop(arg);
+                break;
+            case VIRTQC_cudaGetErrorName:
+                qcu_cudaGetErrorName(arg);
+                break;
+            case VIRTQC_cudaPeekAtLastError:
+                qcu_cudaPeekAtLastError(arg);
+                break;
+            case VIRTQC_cudaMemGetInfo:
+                qcu_cudaMemGetInfo(arg);
+                break;
+            case VIRTQC_cudaDeviceSetCacheConfig:
+                qcu_cudaDeviceSetCacheConfig(arg);
+                break;
+            case VIRTQC_cudaDeviceGetAttribute:
+                qcu_cudaDeviceGetAttribute(arg);
                 break;
 #endif
             default:
