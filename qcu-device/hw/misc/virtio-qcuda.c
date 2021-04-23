@@ -961,6 +961,17 @@ static void qcu_cudaDeviceCanAccessPeer(VirtioQCArg *arg) {
     arg->cmd = err;
 }
 
+static void qcu_cudaFuncGetAttributes(VirtioQCArg *arg) {
+    cudaError_t err;
+    cudaError(err = cudaFuncGetAttributes((struct cudaFuncAttributes *) arg->pA, (const void *) arg->pB));
+    arg->cmd = err;
+}
+
+static void qcu_cudaFuncSetAttribute(VirtioQCArg *arg) {
+    cudaError_t err;
+    cudaError(err = cudaFuncSetAttribute((const void *) arg->pA, (enum cudaFuncAttribute) arg->pB, (int) arg->rnd));
+    arg->cmd = err;
+}
 
 #endif // CONFIG_CUDA
 
@@ -1377,7 +1388,12 @@ static void virtio_qcuda_cmd_handle(VirtIODevice *vdev, VirtQueue *vq) {
             case VIRTQC_cudaDeviceCanAccessPeer:
                 qcu_cudaDeviceCanAccessPeer(arg);
                 break;
-
+            case VIRTQC_cudaFuncGetAttributes:
+                qcu_cudaFuncGetAttributes(arg);
+                break;
+            case VIRTQC_cudaFuncSetAttribute:
+                qcu_cudaFuncSetAttribute(arg);
+                break;
 #endif
             default:
                 error("unknow cmd= %d\n", arg->cmd);

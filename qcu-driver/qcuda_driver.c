@@ -81,33 +81,45 @@ struct virtio_qc_mmap {
 ///	General Function
 ////////////////////////////////////////////////////////////////////////////////
 
-static inline unsigned long copy_from_user_safe(void *to, const void __user *from, unsigned long n){
-    unsigned long err;
+static inline unsigned long copy_from_user_safe(void *to, const void __user
 
-    if( from==NULL || n==0 ){
-        memset(to,0, n);
-        return 0;
-    }
+*from,
+unsigned long n
+){
+unsigned long err;
 
-    err = copy_from_user(to, from, n);
-    if( err ){
-        error("copy_from_user is could not copy  %lu bytes\n", err);
-        BUG_ON(1);
-    }
-
-    return err;
+if( from==NULL || n==0 ){
+memset(to,
+0, n);
+return 0;
 }
 
-static inline unsigned long copy_to_user_safe(void __user *to, const void *from, unsigned long n) {
-    unsigned long err;
-    if( to==NULL || n==0 )
-        return 0;
+err = copy_from_user(to, from, n);
+if( err ){
+error("copy_from_user is could not copy  %lu bytes\n", err);
+BUG_ON(1);
+}
 
-    err = copy_to_user(to, from, n);
-    if( err ){
-        error("copy_to_user is could not copy  %lu bytes\n", err);
-    }
-    return err;
+return
+err;
+}
+
+static inline unsigned long copy_to_user_safe(void __user
+
+*to,
+const void *from,
+unsigned long n
+) {
+unsigned long err;
+if( to==NULL || n==0 )
+return 0;
+
+err = copy_to_user(to, from, n);
+if( err ){
+error("copy_to_user is could not copy  %lu bytes\n", err);
+}
+return
+err;
 }
 
 static inline void *kzalloc_safe(size_t size) {
@@ -728,6 +740,13 @@ void qcu_cudaDeviceCanAccessPee(VirtioQCArg *arg) {
     qcu_misc_send_cmd(arg);
 }
 
+void qcu_cudaFuncGetAttributes(VirtioQCArg *arg) {
+    qcu_misc_send_cmd(arg);
+}
+
+void qcu_cudaFuncSetAttribute(VirtioQCArg *arg) {
+    qcu_misc_send_cmd(arg);
+}
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1191,10 +1210,17 @@ static long qcu_misc_ioctl(struct file *filp, unsigned int _cmd, unsigned long _
 
         case VIRTQC_cudaDeviceCanAccessPeer:
             qcu_cudaDeviceCanAccessPee(arg);
+            break;
 
+        case VIRTQC_cudaFuncGetAttributes:
+            qcu_cudaFuncGetAttributes(arg);
+            break;
+        case VIRTQC_cudaFuncSetAttribute:
+            qcu_cudaFuncSetAttribute(arg);
+            break;
 
         default:
-            error("unknow cmd= %d\n", arg->cmd);
+        error("unknow cmd= %d\n", arg->cmd);
             break;
     }
 
@@ -1523,7 +1549,9 @@ static struct virtio_driver virtio_qcuda_driver = {
         .remove             = qcu_virtio_remove,
 };
 
-static int __init init(void) {
+static int __init
+
+init(void) {
     int ret;
 
     ret = register_virtio_driver(&virtio_qcuda_driver);
@@ -1533,14 +1561,17 @@ static int __init init(void) {
     return ret;
 }
 
-static void __exit fini(void) {
+static void __exit
+
+fini(void) {
     unregister_virtio_driver(&virtio_qcuda_driver);
 }
 
 module_init(init);
 module_exit(fini);
 
-MODULE_DEVICE_TABLE(virtio, id_table);
+MODULE_DEVICE_TABLE(virtio, id_table
+);
 MODULE_DESCRIPTION("Qemu Virtio qCUdriver");
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Yu-Shiang Lin");

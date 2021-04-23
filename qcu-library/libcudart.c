@@ -84,8 +84,8 @@ void close_device() {
 }
 
 void send_cmd_to_device(int cmd, VirtioQCArg *arg) {
-	if(__builtin_expect(!!(fd==-1), 0))
-		open_device();
+    if (__builtin_expect(!!(fd == -1), 0))
+        open_device();
     ioctl(fd, cmd, arg);
 }
 
@@ -274,11 +274,11 @@ void __cudaRegisterFunction(
     else     ptrace("wSize is NULL\n");
 
     memset(&arg, 0, sizeof(VirtioQCArg));
-    fatBinHeader = (computeFatBinaryFormat_t)(*fatCubinHandle);
+    fatBinHeader = (computeFatBinaryFormat_t) (*fatCubinHandle);
 
     ptr(arg.pA, fatBinHeader, fatBinHeader->fatSize);
     ptr(arg.pB, deviceName, strlen(deviceName) + 1);
-    arg.flag = (uint32_t)(uint64_t)hostFun;
+    arg.flag = (uint32_t) (uint64_t) hostFun;
 
     ptrace("pA= %p, pASize= %u, pB= %p, pBSize= %u\n",
            (void *) arg.pA, arg.pASize, (void *) arg.pB, arg.pBSize);
@@ -358,7 +358,7 @@ cudaError_t cudaSetupArgument(
 */
     // set data size
     memcpy(&cudaKernelPara[cudaParaSize], &size, sizeof(uint32_t));
-    ptrace("size= %u\n", *(uint32_t * ) & cudaKernelPara[cudaParaSize]);
+    ptrace("size= %u\n", *(uint32_t *) &cudaKernelPara[cudaParaSize]);
     cudaParaSize += sizeof(uint32_t);
 
     // set data
@@ -381,8 +381,8 @@ cudaError_t cudaLaunch(const void *func) {
 //	ptr( arg.pA, cudaKernelConf, 7*sizeof(uint32_t));
     ptr(arg.pA, cudaKernelConf, 8 * sizeof(uint64_t));
     ptr(arg.pB, cudaKernelPara, cudaParaSize);
-    arg.flag = (uint32_t)(uint64_t)
-    func;
+    arg.flag = (uint32_t) (uint64_t)
+            func;
 
     arg.rnd = syscall(__NR_gettid);
 
@@ -725,7 +725,7 @@ cudaError_t cudaEventRecord(cudaEvent_t event, cudaStream_t stream) {
 
     memset(&arg, 0, sizeof(VirtioQCArg));
 
-    uint64_t mystream = (stream == NULL) ? (uint64_t) - 1 : (uint64_t) stream;
+    uint64_t mystream = (stream == NULL) ? (uint64_t) -1 : (uint64_t) stream;
 
     ptr(arg.pA, event, 0);
     //ptr( arg.pB, stream, 0);
@@ -946,5 +946,24 @@ cudaError_t cudaDeviceCanAccessPeer(int *canAccessPeer,
     arg.pBSize = peerDevice;
 
     send_cmd_to_device(VIRTQC_cudaDeviceCanAccessPeer, &arg);
+    return (cudaError_t) arg.cmd;
+}
+
+cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes *attr, const void *func) {
+    VirtioQCArg arg;
+    memset(&arg, 0, sizeof(VirtioQCArg));
+    ptr(arg.pA, attr, 0);
+    ptr(arg.pB, func, 0);
+    send_cmd_to_device(VIRTQC_cudaFuncGetAttributes, &arg);
+    return (cudaError_t) arg.cmd;
+}
+
+cudaError_t cudaFuncSetAttribute(const void *func, enum cudaFuncAttribute attr, int value) {
+    VirtioQCArg arg;
+    memset(&arg, 0, sizeof(VirtioQCArg));
+    ptr(arg.pA, func, 0);
+    arg.pB = attr;
+    arg.rnd = value;
+    send_cmd_to_device(VIRTQC_cudaFuncSetAttribute, &arg);
     return (cudaError_t) arg.cmd;
 }

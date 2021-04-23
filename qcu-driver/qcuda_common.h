@@ -88,6 +88,8 @@ enum {
     ///////////////////////////////////////////////////////////////
 
     VIRTQC_cudaDeviceCanAccessPeer,
+    VIRTQC_cudaFuncGetAttributes,
+    VIRTQC_cudaFuncSetAttribute
 };
 
 typedef struct VirtioQCArg VirtioQCArg;
