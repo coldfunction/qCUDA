@@ -3,16 +3,18 @@
 #include "qemu/iov.h"
 #include "qemu/error-report.h"
 #include "hw/virtio/virtio.h"
-#include "hw/virtio/virtio-bus.h"
+//#include "hw/virtio/virtio-bus.h"
 #include "hw/virtio/virtio-qcuda.h"
 #include <sys/mman.h>
 
 #include "cpu.h"
 
 #ifdef CONFIG_CUDA
+
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <builtin_types.h>
+
 #endif
 
 
@@ -41,7 +43,7 @@
 #define MIN(a, b) ({ ((a)<(b))? (a):(b) })
 #endif
 
-#define VIRTHM_DEV_PATH "/dev/vf0"
+//#define VIRTHM_DEV_PATH "/dev/vf0"
 
 uint32_t BLOCK_SIZE;
 
@@ -64,38 +66,34 @@ static void *gpa_to_hva(uint64_t pa) {
 
 #ifdef CONFIG_CUDA
 CUdevice cudaDeviceCurrent[20];
-CUcontext cudaContext;
+//CUcontext cudaContext;
+//int cudaContext_count;
 
-int cudaContext_count;
-
-#define cudaFunctionMaxNum 512
+#define cudaFunctionMaxNum 1024
 uint32_t cudaFunctionNum;
 
-#define cudaEventMaxNum 32
+#define cudaEventMaxNum 512
 cudaEvent_t cudaEvent[cudaEventMaxNum];
 uint32_t cudaEventNum;
 
-#define cudaStreamMaxNum 32
+#define cudaStreamMaxNum 512
 cudaStream_t cudaStream[cudaStreamMaxNum];
 uint32_t cudaStreamNum;
 
-typedef struct kernelInfo
-{
+typedef struct kernelInfo {
     void *fatBin;
     char functionName[300];
     uint32_t funcId;
+} kernelInfo;
 
-}kernelInfo;
-
-typedef struct cudaDev
-{
+typedef struct cudaDev {
     CUdevice device;
     CUcontext context;
     uint32_t cudaFunctionId[cudaFunctionMaxNum];
     CUfunction cudaFunction[cudaFunctionMaxNum];
     CUmodule module;
     int kernelsLoaded;
-}cudaDev;
+} cudaDev;
 
 int totalDevices = -1;
 cudaDev *cudaDevices = NULL;
@@ -106,88 +104,75 @@ kernelInfo devicesKernels[cudaFunctionMaxNum];
 __inline__ unsigned int getCurrentID(unsigned int tid);
 
 #define cudaError(err) __cudaErrorCheck(err, __LINE__)
-static inline void __cudaErrorCheck(cudaError_t err, const int line)
-{
+
+static inline void __cudaErrorCheck(cudaError_t err, const int line) {
     char *str;
-    if ( err != cudaSuccess )
-    {
-        str = (char*)cudaGetErrorString(err);
+    if (err != cudaSuccess) {
+        str = (char *) cudaGetErrorString(err);
         error_report("CUDA Runtime API error = %04d \"%s\" line %d\n", err, str, line);
     }
 }
 
 
 #define cuError(err)  __cuErrorCheck(err, __LINE__)
-static inline void __cuErrorCheck(CUresult err, const int line)
-{
+
+static inline void __cuErrorCheck(CUresult err, const int line) {
     char *str;
-    if ( err != CUDA_SUCCESS )
-    {
-        cuGetErrorName(err, (const char**)&str);
-        error_report("CUDA Runtime API error = %04d \"%s\" line %d\n", err, str, line);
+    if (err != CUDA_SUCCESS) {
+        cuGetErrorName(err, (const char **) &str);
+        error_report("CUDA driver API error = %04d \"%s\" line %d\n", err, str, line);
     }
 }
 
 
-static void loadModuleKernels(int devId, void *fBin, char *fName,  uint32_t fId, uint32_t fNum)
-{
+static void loadModuleKernels(int devId, void *fBin, char *fName, uint32_t fId, uint32_t fNum) {
     pfunc();
     ptrace("loading module.... fatBin= %16p ,name= '%s', fId = '%d'\n", fBin, fName, fId);
-    cuError( cuModuleLoadData( &cudaDevices[devId].module, fBin ));
-    cuError( cuModuleGetFunction(&cudaDevices[devId].cudaFunction[fNum],
-                                    cudaDevices[devId].module, fName) );
+    cuError(cuModuleLoadData(&cudaDevices[devId].module, fBin));
+    cuError(cuModuleGetFunction(&cudaDevices[devId].cudaFunction[fNum],
+                                cudaDevices[devId].module, fName));
     cudaDevices[devId].cudaFunctionId[fNum] = fId;
     cudaDevices[devId].kernelsLoaded = 1;
 }
 
-static void reloadAllKernels(unsigned int id)
-{
+static void reloadAllKernels(unsigned int id) {
     pfunc();
     void *fb;
     char *fn;
-    uint32_t i = 0, fId;
+    uint32_t i, fId;
 
-    for(i = 0; i < cudaFunctionNum; i++)
-    {
+    for (i = 0; i < cudaFunctionNum; i++) {
         fb = devicesKernels[i].fatBin;
         fn = devicesKernels[i].functionName;
         fId = devicesKernels[i].funcId;
-        loadModuleKernels( cudaDeviceCurrent[id], fb, fn, fId, i );
+        loadModuleKernels(cudaDeviceCurrent[id], fb, fn, fId, i);
     }
 }
 
-static cudaError_t initializeDevice(unsigned int id)
-{
-    int device = cudaDeviceCurrent[id];
+static cudaError_t initializeDevice(unsigned int id) {
+    CUdevice device = cudaDeviceCurrent[id];
     ptrace("device = %d, cudaDevices[device].kernelsLoaded = %d\n", device, cudaDevices[device].kernelsLoaded);
-    if( device >= totalDevices )
-    {
+    if (device >= totalDevices) {
         ptrace("error setting device= %d\n", device);
         return cudaErrorInvalidDevice;
-    }
-    else
-    {
+    } else {
         // device was reset therefore no context
-        if( !memcmp( &zeroedDevice, &cudaDevices[device], sizeof(cudaDev) ) )
-        {
-            cuError( cuDeviceGet(&cudaDevices[device].device, device) );
-            cuError( cuCtxCreate(&cudaDevices[device].context, 0, cudaDevices[device].device) );
+        if (!memcmp(&zeroedDevice, &cudaDevices[device], sizeof(cudaDev))) {
+            cuError(cuDeviceGet(&cudaDevices[device].device, device));
+            cuError(cuCtxCreate(&cudaDevices[device].context, 0, cudaDevices[device].device));
             ptrace("device was reset therefore no context\n");
-        }
-        else
-        {
-            cuError( cuCtxSetCurrent(cudaDevices[device].context) );
+        } else {
+            cuError(cuCtxSetCurrent(cudaDevices[device].context));
             ptrace("cuda device %d\n", cudaDevices[device].device);
         }
-        if( cudaDevices[device].kernelsLoaded == 0 )
+        if (cudaDevices[device].kernelsLoaded == 0)
             reloadAllKernels(id);
         return 0;
     }
 
 }
 
-__inline__ unsigned int getCurrentID(unsigned int tid)
-{
+__inline__ unsigned int getCurrentID(unsigned int tid) {
     return tid % totalDevices;
 }
 
@@ -196,34 +181,32 @@ __inline__ unsigned int getCurrentID(unsigned int tid)
 ///	Module & Execution control (driver API)
 ////////////////////////////////////////////////////////////////////////////////
 
-static void qcu_cudaRegisterFatBinary(VirtioQCArg *arg)
-{
+static void qcu_cudaRegisterFatBinary(VirtioQCArg *arg) {
     uint32_t i;
     pfunc();
 
-    for(i=0; i<cudaEventMaxNum; i++)
+    for (i = 0; i < cudaEventMaxNum; i++)
         memset(&cudaEvent[i], 0, sizeof(cudaEvent_t));
 
-    for(i=0; i<cudaStreamMaxNum; i++)
+    for (i = 0; i < cudaStreamMaxNum; i++)
         memset(&cudaStream[i], 0, sizeof(cudaStream_t));
 
-    cuError( cuInit(0) );
+    cuError(cuInit(0));
 
-    cuError( cuDeviceGetCount(&totalDevices) );
+    cuError(cuDeviceGetCount(&totalDevices));
     cudaDevices = (cudaDev *) malloc(totalDevices * sizeof(cudaDev));
     memset(&zeroedDevice, 0, sizeof(cudaDev));
 
     i = totalDevices;
     // the last created context is the one used & associated with the device
     // so do this in reverse order
-    while(i-- != 0)
-    {
+    while (i-- != 0) {
         ptrace("creating context for device %d\n", i);
         memset(&cudaDevices[i], 0, sizeof(cudaDev));
-        cuError( cuDeviceGet(&cudaDevices[i].device, i) );
-        cuError( cuCtxCreate(&cudaDevices[i].context, 0, cudaDevices[i].device) );
+        cuError(cuDeviceGet(&cudaDevices[i].device, i));
+        cuError(cuCtxCreate(&cudaDevices[i].context, 0, cudaDevices[i].device));
         memset(&cudaDevices[i].cudaFunction, 0, sizeof(CUfunction) * cudaFunctionMaxNum);
-         cudaDevices[i].kernelsLoaded = 0;
+        cudaDevices[i].kernelsLoaded = 0;
     }
     //do loadbalance
 #ifdef AUTO_ASSIGN_GPU_ENABLE
@@ -239,67 +222,58 @@ static void qcu_cudaRegisterFatBinary(VirtioQCArg *arg)
     cudaDeviceCurrent[0] = cudaDevices[id].device; // used when calling cudaGetDevice
 
     initializeDevice(0);
-
-
 #else
     cudaDeviceCurrent[0] = cudaDevices[0].device; // used when calling cudaGetDevice
 #endif
 
     cudaFunctionNum = 0;
     cudaEventNum = 0;
-
     cudaStreamNum = 0;
 
-    cudaContext_count = 1;
-
+//    cudaContext_count = 1;
 }
 
-static void qcu_cudaRegisterVar(VirtioQCArg *arg)
-{
+static void qcu_cudaRegisterVar(VirtioQCArg *arg) {
     ptrace("call cudaRegisterVar\n");
 }
 
 
-static void qcu_cudaUnregisterFatBinary(VirtioQCArg *arg)
-{
+static void qcu_cudaUnregisterFatBinary(VirtioQCArg *arg) {
     uint32_t i;
     pfunc();
 
     //for(i=0; i<cudaEventMaxNum; i++)
     //{
-        //if( cudaEvent[i] != 0 ){
-        //	cudaError( cudaEventDestroy(cudaEvent[i]));
-        //}
+    //if( cudaEvent[i] != 0 ){
+    //	cudaError( cudaEventDestroy(cudaEvent[i]));
+    //}
     //}
 
 
-    for(i = 0; i < totalDevices; i++)
-    {
+    for (i = 0; i < totalDevices; i++) {
         // get rid of default context if any
         // when a device is reset there will be no context
-        if( memcmp( &zeroedDevice, &cudaDevices[i], sizeof(cudaDev) ) != 0 )
-        {
-            cudaError( cuCtxDestroy(cudaDevices[i].context) );
+        if (memcmp(&zeroedDevice, &cudaDevices[i], sizeof(cudaDev)) != 0) {
+            cuError(cuCtxDestroy(cudaDevices[i].context));
         }
     }
     free(cudaDevices);
     totalDevices = -1;
 }
 
-static void qcu_cudaRegisterFunction(VirtioQCArg *arg)
-{
+static void qcu_cudaRegisterFunction(VirtioQCArg *arg) {
     void *fatBin;
     char *functionName;
     uint32_t funcId;
     pfunc();
 
     // assume fatbin size is less equal 4MB
-    fatBin       = gpa_to_hva(arg->pA);
+    fatBin = gpa_to_hva(arg->pA);
     functionName = gpa_to_hva(arg->pB);
-    funcId		 = arg->flag;
+    funcId = arg->flag;
 
     //initialize the kernelInfo
-    devicesKernels[cudaFunctionNum].fatBin = malloc(4*1024*1024);
+    devicesKernels[cudaFunctionNum].fatBin = malloc(4 * 1024 * 1024);
 
     memcpy(devicesKernels[cudaFunctionNum].fatBin, fatBin, arg->pASize);
     memcpy(devicesKernels[cudaFunctionNum].functionName, functionName, arg->pBSize);
@@ -311,21 +285,19 @@ static void qcu_cudaRegisterFunction(VirtioQCArg *arg)
     int i = totalDevices;
     // the last created context is the one used & associated with the device
     // so do this in reverse order
-    while(i-- != 0)
-    {
+    while (i-- != 0) {
         //loadModuleKernels( cudaDeviceCurrent[i], fatBin, functionName, funcId, cudaFunctionNum );
-        loadModuleKernels( i, fatBin, functionName, funcId, cudaFunctionNum );
+        loadModuleKernels(i, fatBin, functionName, funcId, cudaFunctionNum);
     }
     cudaFunctionNum++;
 
-    ptrace("totalDevices = %d, cudaFunction = %d\n");
+    ptrace("totalDevices = %d, cudaFunction = %d\n", totalDevices, cudaFunctionNum);
 
     //TODO: cudaStreamDestroy in default
     cudaError(global_err = cudaStreamCreate(&cudaStream[0]));
 }
 
-static void qcu_cudaLaunch(VirtioQCArg *arg)
-{
+static void qcu_cudaLaunch(VirtioQCArg *arg) {
     uint64_t *conf;
     uint8_t *para;
     uint32_t funcId, paraNum, paraIdx, funcIdx;
@@ -335,41 +307,39 @@ static void qcu_cudaLaunch(VirtioQCArg *arg)
 
     conf = gpa_to_hva(arg->pA);
     para = gpa_to_hva(arg->pB);
-    paraNum = *((uint32_t*)para);
+    paraNum = *((uint32_t *) para);
     funcId = arg->flag;
 
     ptrace("paraNum= %u\n", paraNum);
 
-    paraBuf = malloc(paraNum*sizeof(void*));
+    paraBuf = malloc(paraNum * sizeof(void *));
     paraIdx = sizeof(uint32_t);
 
-    for(i=0; i<paraNum; i++)
-    {
-        paraBuf[i] = &para[paraIdx+sizeof(uint32_t)];
+    for (i = 0; i < paraNum; i++) {
+        paraBuf[i] = &para[paraIdx + sizeof(uint32_t)];
         ptrace("arg %d = 0x%llx size= %u byte\n", i,
-            *(unsigned long long*)paraBuf[i], *(unsigned int*)&para[paraIdx]);
+               *(unsigned long long *) paraBuf[i], *(unsigned int *) &para[paraIdx]);
 
-        paraIdx += *((uint32_t*)&para[paraIdx]) + sizeof(uint32_t);
+        paraIdx += *((uint32_t *) &para[paraIdx]) + sizeof(uint32_t);
     }
 
 
     unsigned int id;
-    id = getCurrentID((unsigned int)arg->rnd);
+    id = getCurrentID((unsigned int) arg->rnd);
 
-    for(funcIdx=0; funcIdx<cudaFunctionNum; funcIdx++)
-    {
-        if( cudaDevices[cudaDeviceCurrent[id]].cudaFunctionId[funcIdx] == funcId )
+    for (funcIdx = 0; funcIdx < cudaFunctionNum; funcIdx++) {
+        if (cudaDevices[cudaDeviceCurrent[id]].cudaFunctionId[funcIdx] == funcId)
             break;
     }
 
-    ptrace("grid (%u %u %u) block(%u %u %u) sharedMem(%u)\n",
-            conf[0], conf[1], conf[2], conf[3], conf[4], conf[5], conf[6]);
+    ptrace("grid (%lu %lu %lu) block(%lu %lu %lu) sharedMem(%lu)\n",
+           conf[0], conf[1], conf[2], conf[3], conf[4], conf[5], conf[6]);
 
 
-    cuError( cuLaunchKernel(cudaDevices[cudaDeviceCurrent[id]].cudaFunction[funcIdx],
-                conf[0], conf[1], conf[2],
-                conf[3], conf[4], conf[5],
-                conf[6], cudaStream[conf[7]], paraBuf, NULL));
+    cuError(cuLaunchKernel(cudaDevices[cudaDeviceCurrent[id]].cudaFunction[funcIdx],
+                           conf[0], conf[1], conf[2],
+                           conf[3], conf[4], conf[5],
+                           conf[6], cudaStream[conf[7]], paraBuf, NULL));
 
     free(paraBuf);
 }
@@ -378,46 +348,43 @@ static void qcu_cudaLaunch(VirtioQCArg *arg)
 /// Memory Management (runtime API)
 ////////////////////////////////////////////////////////////////////////////////
 
-static void qcu_cudaMalloc(VirtioQCArg *arg)
-{
+static void qcu_cudaMalloc(VirtioQCArg *arg) {
     cudaError_t err;
     uint32_t count;
-    void* devPtr;
+    void *devPtr;
     pfunc();
 
     unsigned int id;
-    id = getCurrentID((unsigned int)arg->rnd);
+    id = getCurrentID((unsigned int) arg->rnd);
     // in case cudaReset was the previous call
     initializeDevice(id);
 
 
     count = arg->flag;
-    cudaError((err = cudaMalloc( &devPtr, count )));
+    cudaError((err = cudaMalloc(&devPtr, count)));
     arg->cmd = err;
-    arg->pA = (uint64_t)devPtr;
+    arg->pA = (uint64_t) devPtr;
 
-    ptrace("ptr= %p ,count= %u\n", (void*)arg->pA, count);
+    ptrace("ptr= %p ,count= %u\n", (void *) arg->pA, count);
 }
 
-static void qcu_cudaMemset(VirtioQCArg *arg)
-{
+static void qcu_cudaMemset(VirtioQCArg *arg) {
     cudaError_t err;
-    void* dst;
+    void *dst;
 
     unsigned int id;
-    id = getCurrentID((unsigned int)arg->rnd);
+    id = getCurrentID((unsigned int) arg->rnd);
     // in case cudaReset was the previous call
     initializeDevice(id);
 
-    dst = (void*)arg->pA;
+    dst = (void *) arg->pA;
     cudaError((err = cudaMemset(dst, arg->para, arg->pASize)));
     arg->cmd = err;
 }
 
-static void qcu_cudaMemcpy(VirtioQCArg *arg)
-{
+static void qcu_cudaMemcpy(VirtioQCArg *arg) {
 
-    cudaError_t err = 0;
+    CUresult err = 0;
     uint32_t size, len, i;
 
     void *dst, *src;
@@ -426,49 +393,44 @@ static void qcu_cudaMemcpy(VirtioQCArg *arg)
     pfunc();
 
     unsigned int id;
-    id = getCurrentID((unsigned int)arg->rnd);
+    id = getCurrentID((unsigned int) arg->rnd);
     // in case cudaReset was the previous call
     initializeDevice(id);
 
-    if( arg->flag == cudaMemcpyHostToDevice )
-    {
-        dst = (void*)arg->pA;
+    if (arg->flag == cudaMemcpyHostToDevice) {
+        dst = (void *) arg->pA;
         size = arg->pBSize;
 #ifdef USER_KERNEL_COPY
         if( size > QCU_KMALLOC_MAX_SIZE)
         {
 #endif
-               if(arg->para)
-            {
-                src = gpa_to_hva(arg->pB);
-                err = cuMemcpyHtoD((CUdeviceptr)dst, src, size);
-            }
-            else
-            {
-                gpa_array = gpa_to_hva(arg->pB);
+        if (arg->para) {
+            src = gpa_to_hva(arg->pB);
+            err = cuMemcpyHtoD((CUdeviceptr) dst, src, size);
+        } else {
+            gpa_array = gpa_to_hva(arg->pB);
 
-                uint32_t offset   	 = arg->pASize;
-                uint32_t start_offset = offset%BLOCK_SIZE;
-                uint32_t rsize = BLOCK_SIZE - start_offset;
+            uint32_t offset = arg->pASize;
+            uint32_t start_offset = offset % BLOCK_SIZE;
+            uint32_t rsize = BLOCK_SIZE - start_offset;
 
-                src = gpa_to_hva(gpa_array[0]);
-                len = MIN(size, rsize);
-                err = cuMemcpyHtoD((CUdeviceptr)dst, src, len);
+            src = gpa_to_hva(gpa_array[0]);
+            len = MIN(size, rsize);
+            err = cuMemcpyHtoD((CUdeviceptr) dst, src, len);
+
+            size -= len;
+            dst += len;
+
+            for (i = 0; size > 0; i++) {
+                src = gpa_to_hva(gpa_array[i + 1]);
+                len = MIN(size, BLOCK_SIZE);
+                err = cuMemcpyHtoD((CUdeviceptr) dst, src, len);
 
                 size -= len;
                 dst += len;
-
-                for(i=0; size>0; i++)
-                {
-                    src = gpa_to_hva(gpa_array[i+1]);
-                    len = MIN(size, BLOCK_SIZE);
-                    err = cuMemcpyHtoD((CUdeviceptr)dst, src, len);
-
-                    size -= len;
-                    dst  += len;
-                }
-
             }
+
+        }
 
 #ifdef USER_KERNEL_COPY
         }
@@ -479,54 +441,48 @@ static void qcu_cudaMemcpy(VirtioQCArg *arg)
         }
 #endif
 
-    }
-    else if(arg->flag == cudaMemcpyDeviceToHost )
-    {
-        src = (void*)arg->pB;
+    } else if (arg->flag == cudaMemcpyDeviceToHost) {
+        src = (void *) arg->pB;
         size = arg->pASize;
 
 #ifdef USER_KERNEL_COPY
         if( size > QCU_KMALLOC_MAX_SIZE)
         {
 #endif
-            /*
-            fd 	   = ldl_p(&arg->pBSize);
-            offset = arg->pA;
+        /*
+        fd 	   = ldl_p(&arg->pBSize);
+        offset = arg->pA;
 
-            dst = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, offset);
-            err = cudaMemcpy(dst, src, size, cudaMemcpyDeviceToHost);
-            */
+        dst = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, offset);
+        err = cudaMemcpy(dst, src, size, cudaMemcpyDeviceToHost);
+        */
 
-            if(arg->para)
-            {
-                dst = gpa_to_hva(arg->pA);
-                err = cuMemcpyDtoH(dst, (CUdeviceptr)src, size);
-            }
-            else
-            {
-                gpa_array = gpa_to_hva(arg->pA);
+        if (arg->para) {
+            dst = gpa_to_hva(arg->pA);
+            err = cuMemcpyDtoH(dst, (CUdeviceptr) src, size);
+        } else {
+            gpa_array = gpa_to_hva(arg->pA);
 
-                uint32_t offset   	 = arg->pBSize;
-                uint32_t start_offset = offset%BLOCK_SIZE;
-                uint32_t rsize = BLOCK_SIZE - start_offset;
+            uint32_t offset = arg->pBSize;
+            uint32_t start_offset = offset % BLOCK_SIZE;
+            uint32_t rsize = BLOCK_SIZE - start_offset;
 
-                dst = gpa_to_hva(gpa_array[0]);
-                len = MIN(size, rsize);
-                err = cuMemcpyDtoH(dst, (CUdeviceptr)src, len);
+            dst = gpa_to_hva(gpa_array[0]);
+            len = MIN(size, rsize);
+            err = cuMemcpyDtoH(dst, (CUdeviceptr) src, len);
+
+            size -= len;
+            src += len;
+
+            for (i = 0; size > 0; i++) {
+                dst = gpa_to_hva(gpa_array[i + 1]);
+                len = MIN(size, BLOCK_SIZE);
+                err = cuMemcpyDtoH(dst, (CUdeviceptr) src, len);
 
                 size -= len;
-                src+=len;
-
-                for(i=0; size>0; i++)
-                  {
-                        dst = gpa_to_hva(gpa_array[i+1]);
-                    len = MIN(size, BLOCK_SIZE);
-                    err = cuMemcpyDtoH(dst, (CUdeviceptr)src, len);
-
-                    size -= len;
-                      src  += len;
-                }
+                src += len;
             }
+        }
 #ifdef USER_KERNEL_COPY
         }
         else
@@ -535,21 +491,18 @@ static void qcu_cudaMemcpy(VirtioQCArg *arg)
             err = cuMemcpyDtoH(dst, (CUdeviceptr)src, size);
         }
 #endif
-    }
-    else if( arg->flag == cudaMemcpyDeviceToDevice )
-    {
-        dst = (void*)arg->pA;
-        src = (void*)arg->pB;
+    } else if (arg->flag == cudaMemcpyDeviceToDevice) {
+        dst = (void *) arg->pA;
+        src = (void *) arg->pB;
         size = arg->pBSize;
-        cudaError(( err = cuMemcpyDtoD((CUdeviceptr)dst, (CUdeviceptr)src, size)));
+        cuError((err = cuMemcpyDtoD((CUdeviceptr) dst, (CUdeviceptr) src, size)));
     }
 
     arg->cmd = err;
     ptrace("size= %u\n", size);
 }
 
-static void qcu_cudaMemcpyAsync(VirtioQCArg *arg)
-{
+static void qcu_cudaMemcpyAsync(VirtioQCArg *arg) {
 
     uint32_t size, len, i;
     cudaError_t err = 0;
@@ -561,14 +514,13 @@ static void qcu_cudaMemcpyAsync(VirtioQCArg *arg)
     uint64_t streamIdx = arg->rnd;
     cudaStream_t stream = cudaStream[streamIdx];
 
-    if( arg->flag == cudaMemcpyHostToDevice )
-    {
-        dst = (void*)arg->pA;
+    if (arg->flag == cudaMemcpyHostToDevice) {
+        dst = (void *) arg->pA;
         size = arg->pBSize;
         gpa_array = gpa_to_hva(arg->pB);
 
-        uint32_t offset   	 = arg->pASize;
-        uint32_t start_offset = offset%BLOCK_SIZE;
+        uint32_t offset = arg->pASize;
+        uint32_t start_offset = offset % BLOCK_SIZE;
         uint32_t rsize = BLOCK_SIZE - start_offset;
 
         src = gpa_to_hva(gpa_array[0]);
@@ -578,24 +530,21 @@ static void qcu_cudaMemcpyAsync(VirtioQCArg *arg)
         size -= len;
         dst += len;
 
-        for(i=0; size>0; i++)
-        {
-            src = gpa_to_hva(gpa_array[i+1]);
+        for (i = 0; size > 0; i++) {
+            src = gpa_to_hva(gpa_array[i + 1]);
             len = MIN(size, BLOCK_SIZE);
             err = cudaMemcpyAsync(dst, src, len, cudaMemcpyHostToDevice, stream);
             size -= len;
-            dst  += len;
+            dst += len;
         }
-    }
-    else if(arg->flag == cudaMemcpyDeviceToHost )
-    {
-        src = (void*)arg->pB;
+    } else if (arg->flag == cudaMemcpyDeviceToHost) {
+        src = (void *) arg->pB;
         size = arg->pASize;
 
         gpa_array = gpa_to_hva(arg->pA);
 
-        uint32_t offset   	 = arg->pBSize;
-        uint32_t start_offset = offset%BLOCK_SIZE;
+        uint32_t offset = arg->pBSize;
+        uint32_t start_offset = offset % BLOCK_SIZE;
         uint32_t rsize = BLOCK_SIZE - start_offset;
 
         dst = gpa_to_hva(gpa_array[0]);
@@ -603,42 +552,38 @@ static void qcu_cudaMemcpyAsync(VirtioQCArg *arg)
         err = cudaMemcpyAsync(dst, src, len, cudaMemcpyDeviceToHost, stream);
 
         size -= len;
-        src+=len;
+        src += len;
 
-        for(i=0; size>0; i++)
-          {
-             dst = gpa_to_hva(gpa_array[i+1]);
+        for (i = 0; size > 0; i++) {
+            dst = gpa_to_hva(gpa_array[i + 1]);
             len = MIN(size, BLOCK_SIZE);
             err = cudaMemcpyAsync(dst, src, len, cudaMemcpyDeviceToHost, stream);
 
             size -= len;
-            src  += len;
+            src += len;
         }
-    }
-    else if( arg->flag == cudaMemcpyDeviceToDevice )
-    {
-        src = (void*)arg->pA;
-        dst = (void*)arg->pB;
+    } else if (arg->flag == cudaMemcpyDeviceToDevice) {
+        src = (void *) arg->pA;
+        dst = (void *) arg->pB;
         size = arg->pBSize;
-        cudaError(( err = cudaMemcpyAsync(dst, src, size, cudaMemcpyDeviceToDevice, stream)));
+        cudaError((err = cudaMemcpyAsync(dst, src, size, cudaMemcpyDeviceToDevice, stream)));
     }
 
     arg->cmd = err;
 
 }
 
-static void qcu_cudaFree(VirtioQCArg *arg)
-{
+static void qcu_cudaFree(VirtioQCArg *arg) {
     cudaError_t err;
-    void* dst;
+    void *dst;
     pfunc();
 
     unsigned int id;
-    id = getCurrentID((unsigned int)arg->rnd);
+    id = getCurrentID((unsigned int) arg->rnd);
     // in case cudaReset was the previous call
     initializeDevice(id);
 
-    dst = (void*)arg->pA;
+    dst = (void *) arg->pA;
     cudaError((err = cudaFree(dst)));
     arg->cmd = err;
 
@@ -649,54 +594,51 @@ static void qcu_cudaFree(VirtioQCArg *arg)
 ///	Device Management
 ////////////////////////////////////////////////////////////////////////////////
 
-static void qcu_cudaGetDevice(VirtioQCArg *arg)
-{
+static void qcu_cudaGetDevice(VirtioQCArg *arg) {
     cudaError_t err;
     pfunc();
 
     unsigned int id;
-    id = getCurrentID((unsigned int)arg->rnd);
+    id = getCurrentID((unsigned int) arg->rnd);
 
     // in case cudaReset was the previous call
     initializeDevice(id);
 
-    err      = 0;
+    err = 0;
     arg->cmd = err;
-    arg->pA  = (uint64_t)cudaDevices[cudaDeviceCurrent[id]].device;
+    arg->pA = (uint64_t) cudaDevices[cudaDeviceCurrent[id]].device;
 }
 
-static void qcu_cudaGetDeviceCount(VirtioQCArg *arg)
-{
+static void qcu_cudaGetDeviceCount(VirtioQCArg *arg) {
     cudaError_t err;
     int device;
     pfunc();
 
-    if (likely(totalDevices!=-1) ){
+    if (likely(totalDevices != -1)) {
         unsigned int id;
-        id = getCurrentID((unsigned int)arg->rnd);
+        id = getCurrentID((unsigned int) arg->rnd);
         // in case cudaReset was the previous call
         initializeDevice(id);
     }
-    cudaError((err = cudaGetDeviceCount( &device )));
+    cudaError((err = cudaGetDeviceCount(&device)));
     arg->cmd = err;
-    arg->pA  = (uint64_t)device;
+    arg->pA = (uint64_t) device;
 
     ptrace("device count=%d\n", device);
 }
 
-static void qcu_cudaSetDevice(VirtioQCArg *arg)
-{
+static void qcu_cudaSetDevice(VirtioQCArg *arg) {
     cudaError_t err;
     int device;
     unsigned int id;
 
     pfunc();
 
-    if (unlikely(totalDevices==-1) )
+    if (unlikely(totalDevices == -1))
         qcu_cudaRegisterFatBinary(NULL);
 
-    device = (int)arg->pA;
-    id     = getCurrentID((unsigned int)arg->rnd);
+    device = (int) arg->pA;
+    id = getCurrentID((unsigned int) arg->rnd);
 
     //one id map one device at once
     cudaDeviceCurrent[id] = device;
@@ -708,37 +650,34 @@ static void qcu_cudaSetDevice(VirtioQCArg *arg)
     ptrace("set device= %d\n", device);
 }
 
-static void qcu_cudaGetDeviceProperties(VirtioQCArg *arg)
-{
+static void qcu_cudaGetDeviceProperties(VirtioQCArg *arg) {
     cudaError_t err;
     struct cudaDeviceProp *prop;
     int device;
     pfunc();
 
     prop = gpa_to_hva(arg->pA);
-    device = (int)arg->pB;
+    device = (int) arg->pB;
 
-    cudaError((err = cudaGetDeviceProperties( prop, device )));
+    cudaError((err = cudaGetDeviceProperties(prop, device)));
     arg->cmd = err;
 
     ptrace("get prop for device %d\n", device);
 }
 
-static void qcu_cudaDeviceSynchronize(VirtioQCArg *arg)
-{
+static void qcu_cudaDeviceSynchronize(VirtioQCArg *arg) {
     cudaError_t err;
     pfunc();
     cudaError((err = cudaDeviceSynchronize()));
     arg->cmd = err;
 }
 
-static void qcu_cudaDeviceReset(VirtioQCArg *arg)
-{
+static void qcu_cudaDeviceReset(VirtioQCArg *arg) {
     cudaError_t err;
     pfunc();
 
     unsigned int id;
-    id = getCurrentID((unsigned int)arg->rnd);
+    id = getCurrentID((unsigned int) arg->rnd);
 
     // TODO:
     // should get rid of events for current device
@@ -746,21 +685,18 @@ static void qcu_cudaDeviceReset(VirtioQCArg *arg)
 
     cudaError((err = cudaDeviceReset()));
 
-    memset( &cudaDevices[cudaDeviceCurrent[id]], 0, sizeof(cudaDev) );
+    memset(&cudaDevices[cudaDeviceCurrent[id]], 0, sizeof(cudaDev));
     arg->cmd = err;
 }
 
-static void qcu_cudaDeviceSetLimit(VirtioQCArg *arg)
-{
+static void qcu_cudaDeviceSetLimit(VirtioQCArg *arg) {
     cudaError_t err;
-    int device;
 
     pfunc();
 
     cudaError(err = cudaDeviceSetLimit(arg->pA, arg->pB));
 
     arg->cmd = err;
-
 }
 
 
@@ -768,28 +704,26 @@ static void qcu_cudaDeviceSetLimit(VirtioQCArg *arg)
 ///	Version Management
 ////////////////////////////////////////////////////////////////////////////////
 
-static void qcu_cudaDriverGetVersion(VirtioQCArg *arg)
-{
+static void qcu_cudaDriverGetVersion(VirtioQCArg *arg) {
     cudaError_t err;
     int version;
     pfunc();
 
-    cudaError((err = cudaDriverGetVersion( &version )));
+    cudaError((err = cudaDriverGetVersion(&version)));
     arg->cmd = err;
-    arg->pA = (uint64_t)version;
+    arg->pA = (uint64_t) version;
 
     ptrace("driver version= %d\n", version);
 }
 
-static void qcu_cudaRuntimeGetVersion(VirtioQCArg *arg)
-{
+static void qcu_cudaRuntimeGetVersion(VirtioQCArg *arg) {
     cudaError_t err;
     int version;
     pfunc();
 
-    cudaError((err = cudaRuntimeGetVersion( &version )));
+    cudaError((err = cudaRuntimeGetVersion(&version)));
     arg->cmd = err;
-    arg->pA = (uint64_t)version;
+    arg->pA = (uint64_t) version;
 
     ptrace("runtime driver= %d\n", version);
 }
@@ -808,8 +742,7 @@ static void qcu_cudaRuntimeGetVersion(VirtioQCArg *arg)
 ///	Event Management
 ////////////////////////////////////////////////////////////////////////////////
 
-static void qcu_cudaEventCreate(VirtioQCArg *arg)
-{
+static void qcu_cudaEventCreate(VirtioQCArg *arg) {
     cudaError_t err;
     uint32_t idx;
     pfunc();
@@ -817,40 +750,38 @@ static void qcu_cudaEventCreate(VirtioQCArg *arg)
     idx = cudaEventNum;
     cudaError((err = cudaEventCreate(&cudaEvent[idx])));
     arg->cmd = err;
-    arg->pA = (uint64_t)idx;
+    arg->pA = (uint64_t) idx;
 
-    cudaEventNum = (cudaEventNum+1) % cudaEventMaxNum;
+    cudaEventNum = (cudaEventNum + 1) % cudaEventMaxNum;
     ptrace("create event %u\n", idx);
 }
 
-static void qcu_cudaEventCreateWithFlags(VirtioQCArg *arg)
-{
+static void qcu_cudaEventCreateWithFlags(VirtioQCArg *arg) {
     cudaError_t err;
     uint32_t idx;
 
     idx = cudaEventNum;
     cudaError((err = cudaEventCreateWithFlags(&cudaEvent[idx], arg->flag)));
     arg->cmd = err;
-    arg->pA = (uint64_t)idx;
+    arg->pA = (uint64_t) idx;
 
-    cudaEventNum = (cudaEventNum+1) % cudaEventMaxNum;
+    cudaEventNum = (cudaEventNum + 1) % cudaEventMaxNum;
     ptrace("create event %u\n", idx);
 }
 
-static void qcu_cudaEventRecord(VirtioQCArg *arg)
-{
+static void qcu_cudaEventRecord(VirtioQCArg *arg) {
     cudaError_t err;
     uint32_t eventIdx;
     uint64_t streamIdx;
     pfunc();
 
-    eventIdx  = arg->pA;
+    eventIdx = arg->pA;
     streamIdx = arg->pB;
 
-    if(streamIdx == (uint64_t)-1)
-         cudaError((err = cudaEventRecord(cudaEvent[eventIdx], NULL)));
-     else
-         cudaError((err = cudaEventRecord(cudaEvent[eventIdx], cudaStream[streamIdx])));
+    if (streamIdx == (uint64_t) -1)
+        cudaError((err = cudaEventRecord(cudaEvent[eventIdx], NULL)));
+    else
+        cudaError((err = cudaEventRecord(cudaEvent[eventIdx], cudaStream[streamIdx])));
 
 
     arg->cmd = err;
@@ -858,21 +789,19 @@ static void qcu_cudaEventRecord(VirtioQCArg *arg)
     ptrace("event record %u\n", eventIdx);
 }
 
-static void qcu_cudaEventSynchronize(VirtioQCArg *arg)
-{
+static void qcu_cudaEventSynchronize(VirtioQCArg *arg) {
     cudaError_t err;
     uint32_t idx;
     pfunc();
 
     idx = arg->pA;
-    cudaError((err = cudaEventSynchronize( cudaEvent[idx] )));
+    cudaError((err = cudaEventSynchronize(cudaEvent[idx])));
     arg->cmd = err;
 
     ptrace("sync event %u\n", idx);
 }
 
-static void qcu_cudaEventElapsedTime(VirtioQCArg *arg)
-{
+static void qcu_cudaEventElapsedTime(VirtioQCArg *arg) {
     cudaError_t err;
     uint32_t startIdx;
     uint32_t endIdx;
@@ -880,17 +809,16 @@ static void qcu_cudaEventElapsedTime(VirtioQCArg *arg)
     pfunc();
 
     startIdx = arg->pA;
-    endIdx   = arg->pB;
+    endIdx = arg->pB;
     cudaError((err = cudaEventElapsedTime(&ms, cudaEvent[startIdx], cudaEvent[endIdx])));
     arg->cmd = err;
     memcpy(&arg->flag, &ms, sizeof(float));
 
     ptrace("event elapse time= %f, start= %u, end= %u\n",
-            ms, startIdx, endIdx);
+           ms, startIdx, endIdx);
 }
 
-static void qcu_cudaEventDestroy(VirtioQCArg *arg)
-{
+static void qcu_cudaEventDestroy(VirtioQCArg *arg) {
     cudaError_t err;
     uint32_t idx;
     pfunc();
@@ -906,62 +834,57 @@ static void qcu_cudaEventDestroy(VirtioQCArg *arg)
 ///	Error Handling
 ////////////////////////////////////////////////////////////////////////////////
 
-static void qcu_cudaGetLastError(VirtioQCArg *arg)
-{
+static void qcu_cudaGetLastError(VirtioQCArg *arg) {
     cudaError_t err;
     pfunc();
 
-    err =  cudaGetLastError();
+    err = cudaGetLastError();
     arg->cmd = err;
-    ptrace("lasr cudaError %d\n", err);
+    ptrace("last cudaError %d\n", err);
 }
 
 //////////zero-copy////////
 
-static void qcu_cudaHostRegister(VirtioQCArg *arg)
-{
-    int size, i;
+static void qcu_cudaHostRegister(VirtioQCArg *arg) {
+    uint32_t size, i;
     cudaError_t err = 0;
     void *ptr;
     uint64_t *gpa_array;
     size = arg->pASize;
     gpa_array = gpa_to_hva(arg->pA);
 
-    for(i = 0; size>0; i++)
-    {
+    for (i = 0; size > 0; i++) {
         ptr = gpa_to_hva(gpa_array[i]);
-        err = cudaHostRegister(ptr, MIN(BLOCK_SIZE,size), arg->flag);
-        size-=BLOCK_SIZE;
+        err = cudaHostRegister(ptr, MIN(BLOCK_SIZE, size), arg->flag);
+        size -= BLOCK_SIZE;
     }
     arg->cmd = err;
 
     //fix for cudaHostGetDevicePointer start
 
     int fd = ldl_p(&arg->pBSize);
-    uint64_t offset = arg->rnd;
+    int64_t offset = (int64_t) arg->rnd;
     size = arg->pASize;
 
     ptr = mmap(0, arg->pB, PROT_READ | PROT_WRITE, MAP_SHARED, fd, offset);
 
     err = cudaHostRegister(ptr, size, arg->flag);
-    arg->rnd = (uint64_t)ptr;
+    arg->rnd = (uint64_t) ptr;
     arg->cmd = err;
 
     //fix for cudaHostGetDevicePointer end
 }
 
-static void qcu_cudaHostGetDevicePointer(VirtioQCArg *arg)
-{
+static void qcu_cudaHostGetDevicePointer(VirtioQCArg *arg) {
     cudaError_t err;
-    void *ptr = (void*)	arg->pB;
+    void *ptr = (void *) arg->pB;
     void *devPtr;
     err = cudaHostGetDevicePointer(&devPtr, ptr, arg->flag);
-    arg->pA = (uint64_t)devPtr;
+    arg->pA = (uint64_t) devPtr;
     arg->cmd = err;
 }
 
-static void qcu_cudaHostUnregister(VirtioQCArg *arg)
-{
+static void qcu_cudaHostUnregister(VirtioQCArg *arg) {
 
     uint32_t size, i;
     void *ptr;
@@ -971,17 +894,15 @@ static void qcu_cudaHostUnregister(VirtioQCArg *arg)
 
     gpa_array = gpa_to_hva(arg->pA);
 
-    for(i = 0; size>0; i++)
-    {
+    for (i = 0; size > 0; i++) {
         ptr = gpa_to_hva(gpa_array[i]);
-        size-=BLOCK_SIZE;
+        size -= BLOCK_SIZE;
         err = cudaHostUnregister(ptr);
     }
     arg->cmd = err;
 }
 
-static void qcu_cudaSetDeviceFlags(VirtioQCArg *arg)
-{
+static void qcu_cudaSetDeviceFlags(VirtioQCArg *arg) {
     cudaError_t err;
 //	err = cudaSetDeviceFlags(arg->flag);
     err = 0;
@@ -989,22 +910,20 @@ static void qcu_cudaSetDeviceFlags(VirtioQCArg *arg)
 }
 
 //stream
-static void qcu_cudaStreamCreate(VirtioQCArg *arg)
-{
+static void qcu_cudaStreamCreate(VirtioQCArg *arg) {
     cudaError_t err;
 
-    if(cudaStreamNum != 0)
+    if (cudaStreamNum != 0)
         err = cudaStreamCreate(&cudaStream[cudaStreamNum]);
     else
         err = global_err;
 
     arg->pA = cudaStreamNum;
     cudaStreamNum++;
-     arg->cmd = err;
+    arg->cmd = err;
 }
 
-static void qcu_cudaStreamDestroy(VirtioQCArg *arg)
-{
+static void qcu_cudaStreamDestroy(VirtioQCArg *arg) {
     cudaError_t err;
     uint32_t idx;
 
@@ -1014,8 +933,7 @@ static void qcu_cudaStreamDestroy(VirtioQCArg *arg)
     memset(&cudaStream[idx], 0, sizeof(cudaStream_t));
 }
 
-static void qcu_cudaStreamSynchronize(VirtioQCArg *arg)
-{
+static void qcu_cudaStreamSynchronize(VirtioQCArg *arg) {
     cudaError_t err;
     uint32_t idx;
     idx = arg->pA;
@@ -1026,8 +944,7 @@ static void qcu_cudaStreamSynchronize(VirtioQCArg *arg)
 }
 
 // Thread Management
-static void qcu_cudaThreadSynchronize(VirtioQCArg *arg)
-{
+static void qcu_cudaThreadSynchronize(VirtioQCArg *arg) {
     cudaError_t err;
     cudaError(err = cudaThreadSynchronize());
 
@@ -1038,9 +955,9 @@ static void qcu_cudaThreadSynchronize(VirtioQCArg *arg)
 ///	New cuda API  (for cuda runtime 9.0
 ////////////////////////////////////////////////////////////////////////////////
 
-static void qcu_cudaDeviceCanAccessPeer(VirtioQCArg *arg){
+static void qcu_cudaDeviceCanAccessPeer(VirtioQCArg *arg) {
     cudaError_t err;
-    cudaError(err=cudaDeviceCanAccessPeer((int*)arg->pA,arg->pB,arg->pBSize));
+    cudaError(err = cudaDeviceCanAccessPeer((int *) arg->pA, arg->pB, arg->pBSize));
     arg->cmd = err;
 }
 
@@ -1182,7 +1099,10 @@ static int qcu_cmd_mmap(VirtioQCArg *arg) {
     for (i = 0; i < arg->pASize; i++) {
         addr = gpa_to_hva(gpa_array[i]);
         munmap(addr, BLOCK_SIZE);
-        mmap(addr, BLOCK_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, i * BLOCK_SIZE);
+        void *ptr = mmap(addr, BLOCK_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, i * BLOCK_SIZE);
+        if (unlikely(ptr == (void *) -1)) {
+            error_report("mmap Error %d: %s\n", errno, strerror(errno));
+        }
     }
 
 
@@ -1200,7 +1120,11 @@ static int qcu_cmd_munmap(VirtioQCArg *arg) {
     for (i = 0; i < arg->pBSize; i++) {
         addr = gpa_to_hva(gpa_array[i]);
         munmap(addr, BLOCK_SIZE);
-        mmap(addr, BLOCK_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+        void *ptr = mmap(addr, BLOCK_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED,
+                         -1, 0);
+        if (unlikely(ptr == (void *) -1)) {
+            error_report("mmap Error %d: %s\n", errno, strerror(errno));
+        }
     }
 
     return 0;
@@ -1237,7 +1161,7 @@ static void virtio_qcuda_cmd_handle(VirtIODevice *vdev, VirtQueue *vq) {
         return;
     }
 
-    while ( elem=virtqueue_pop(vq, sizeof(VirtQueueElement)) ) {
+    while (elem = virtqueue_pop(vq, sizeof(VirtQueueElement))) {
         if (elem->out_num < 1 || elem->in_num < 1) {
             virtio_error(vdev, "virtio-qcuda VirtioQCArg missing headers");
             virtqueue_detach_element(vq, elem, 0);
@@ -1293,166 +1217,166 @@ static void virtio_qcuda_cmd_handle(VirtIODevice *vdev, VirtQueue *vq) {
 
 #ifdef CONFIG_CUDA
                 // Module & Execution control (driver API)
-                case VIRTQC_cudaRegisterFatBinary:
-                    qcu_cudaRegisterFatBinary(arg);
-                    break;
-
-                case VIRTQC_cudaUnregisterFatBinary:
-                    qcu_cudaUnregisterFatBinary(arg);
-                    break;
-
-                case VIRTQC_cudaRegisterVar:
-                    qcu_cudaRegisterVar(arg);
+            case VIRTQC_cudaRegisterFatBinary:
+                qcu_cudaRegisterFatBinary(arg);
                 break;
 
-                case VIRTQC_cudaRegisterFunction:
-                    qcu_cudaRegisterFunction(arg);
-                    break;
+            case VIRTQC_cudaUnregisterFatBinary:
+                qcu_cudaUnregisterFatBinary(arg);
+                break;
 
-                case VIRTQC_cudaLaunch:
-                    qcu_cudaLaunch(arg);
-                    break;
+            case VIRTQC_cudaRegisterVar:
+                qcu_cudaRegisterVar(arg);
+                break;
+
+            case VIRTQC_cudaRegisterFunction:
+                qcu_cudaRegisterFunction(arg);
+                break;
+
+            case VIRTQC_cudaLaunch:
+                qcu_cudaLaunch(arg);
+                break;
 
                 // Memory Management (runtime API)
-                case VIRTQC_cudaMalloc:
-                    qcu_cudaMalloc(arg);
-                    break;
+            case VIRTQC_cudaMalloc:
+                qcu_cudaMalloc(arg);
+                break;
 
-                case VIRTQC_cudaMemset:
-                    qcu_cudaMemset(arg);
-                    break;
+            case VIRTQC_cudaMemset:
+                qcu_cudaMemset(arg);
+                break;
 
-                case VIRTQC_cudaMemcpy:
-                    qcu_cudaMemcpy(arg);
-                    break;
+            case VIRTQC_cudaMemcpy:
+                qcu_cudaMemcpy(arg);
+                break;
 
-                case VIRTQC_cudaMemcpyAsync:
-                    qcu_cudaMemcpyAsync(arg);
-                    break;
+            case VIRTQC_cudaMemcpyAsync:
+                qcu_cudaMemcpyAsync(arg);
+                break;
 
-                case VIRTQC_cudaFree:
-                    qcu_cudaFree(arg);
-                    break;
+            case VIRTQC_cudaFree:
+                qcu_cudaFree(arg);
+                break;
 
                 // Device Management (runtime API)
-                case VIRTQC_cudaGetDevice:
-                    qcu_cudaGetDevice(arg);
-                    break;
+            case VIRTQC_cudaGetDevice:
+                qcu_cudaGetDevice(arg);
+                break;
 
-                case VIRTQC_cudaGetDeviceCount:
-                    qcu_cudaGetDeviceCount(arg);
-                    break;
+            case VIRTQC_cudaGetDeviceCount:
+                qcu_cudaGetDeviceCount(arg);
+                break;
 
-                case VIRTQC_cudaSetDevice:
-                    qcu_cudaSetDevice(arg);
-                    break;
+            case VIRTQC_cudaSetDevice:
+                qcu_cudaSetDevice(arg);
+                break;
 
-                case VIRTQC_cudaGetDeviceProperties:
-                    qcu_cudaGetDeviceProperties(arg);
-                    break;
+            case VIRTQC_cudaGetDeviceProperties:
+                qcu_cudaGetDeviceProperties(arg);
+                break;
 
-                case VIRTQC_cudaDeviceSynchronize:
-                    qcu_cudaDeviceSynchronize(arg);
-                    break;
+            case VIRTQC_cudaDeviceSynchronize:
+                qcu_cudaDeviceSynchronize(arg);
+                break;
 
-                case VIRTQC_cudaDeviceReset:
-                    qcu_cudaDeviceReset(arg);
-                    break;
+            case VIRTQC_cudaDeviceReset:
+                qcu_cudaDeviceReset(arg);
+                break;
 
-                case VIRTQC_cudaDeviceSetLimit:
-                    qcu_cudaDeviceSetLimit(arg);
+            case VIRTQC_cudaDeviceSetLimit:
+                qcu_cudaDeviceSetLimit(arg);
                 break;
 
 
                 // Version Management (runtime API)
-                case VIRTQC_cudaDriverGetVersion:
-                    qcu_cudaDriverGetVersion(arg);
-                    break;
+            case VIRTQC_cudaDriverGetVersion:
+                qcu_cudaDriverGetVersion(arg);
+                break;
 
-                case VIRTQC_cudaRuntimeGetVersion:
-                    qcu_cudaRuntimeGetVersion(arg);
-                    break;
-    ///////////////////////////////////////////////
-            //	case VIRTQC_checkCudaCapabilities:
-            //		qcu_checkCudaCapabilities(arg);
-    ///////////////////////////////////////////////
+            case VIRTQC_cudaRuntimeGetVersion:
+                qcu_cudaRuntimeGetVersion(arg);
+                break;
+                ///////////////////////////////////////////////
+                //	case VIRTQC_checkCudaCapabilities:
+                //		qcu_checkCudaCapabilities(arg);
+                ///////////////////////////////////////////////
 
                 //stream
-                case VIRTQC_cudaStreamCreate:
-                    qcu_cudaStreamCreate(arg);
-                    break;
+            case VIRTQC_cudaStreamCreate:
+                qcu_cudaStreamCreate(arg);
+                break;
 
-                case VIRTQC_cudaStreamDestroy:
-                    qcu_cudaStreamDestroy(arg);
-                    break;
+            case VIRTQC_cudaStreamDestroy:
+                qcu_cudaStreamDestroy(arg);
+                break;
 
-                case VIRTQC_cudaStreamSynchronize:
-                    qcu_cudaStreamSynchronize(arg);
-                    break;
+            case VIRTQC_cudaStreamSynchronize:
+                qcu_cudaStreamSynchronize(arg);
+                break;
 
                 // Event Management (runtime API)
-                case VIRTQC_cudaEventCreate:
-                    qcu_cudaEventCreate(arg);
-                    break;
+            case VIRTQC_cudaEventCreate:
+                qcu_cudaEventCreate(arg);
+                break;
 
-                case VIRTQC_cudaEventCreateWithFlags:
-                    qcu_cudaEventCreateWithFlags(arg);
-                    break;
+            case VIRTQC_cudaEventCreateWithFlags:
+                qcu_cudaEventCreateWithFlags(arg);
+                break;
 
-                case VIRTQC_cudaEventRecord:
-                    qcu_cudaEventRecord(arg);
-                    break;
+            case VIRTQC_cudaEventRecord:
+                qcu_cudaEventRecord(arg);
+                break;
 
-                case VIRTQC_cudaEventSynchronize:
-                    qcu_cudaEventSynchronize(arg);
-                    break;
+            case VIRTQC_cudaEventSynchronize:
+                qcu_cudaEventSynchronize(arg);
+                break;
 
-                case VIRTQC_cudaEventElapsedTime:
-                    qcu_cudaEventElapsedTime(arg);
-                    break;
+            case VIRTQC_cudaEventElapsedTime:
+                qcu_cudaEventElapsedTime(arg);
+                break;
 
-                case VIRTQC_cudaEventDestroy:
-                    qcu_cudaEventDestroy(arg);
-                    break;
+            case VIRTQC_cudaEventDestroy:
+                qcu_cudaEventDestroy(arg);
+                break;
 
                 // Error Handling (runtime API)
-                case VIRTQC_cudaGetLastError:
-                    qcu_cudaGetLastError(arg);
-                    break;
+            case VIRTQC_cudaGetLastError:
+                qcu_cudaGetLastError(arg);
+                break;
 
                 //zero-copy
-                case VIRTQC_cudaHostRegister:
-                    qcu_cudaHostRegister(arg);
-                    break;
+            case VIRTQC_cudaHostRegister:
+                qcu_cudaHostRegister(arg);
+                break;
 
-                case VIRTQC_cudaHostGetDevicePointer:
-                    qcu_cudaHostGetDevicePointer(arg);
-                    break;
+            case VIRTQC_cudaHostGetDevicePointer:
+                qcu_cudaHostGetDevicePointer(arg);
+                break;
 
-                case VIRTQC_cudaHostUnregister:
-                    qcu_cudaHostUnregister(arg);
-                    break;
+            case VIRTQC_cudaHostUnregister:
+                qcu_cudaHostUnregister(arg);
+                break;
 
-                case VIRTQC_cudaSetDeviceFlags:
-                    qcu_cudaSetDeviceFlags(arg);
-                    break;
+            case VIRTQC_cudaSetDeviceFlags:
+                qcu_cudaSetDeviceFlags(arg);
+                break;
 
                 //case VIRTQC_cudaFreeHost:
                 //	qcu_cudaFreeHost(arg);
                 //	break;
 
                 // Thread Management
-                case VIRTQC_cudaThreadSynchronize:
-                    qcu_cudaThreadSynchronize(arg);
-                    break;
+            case VIRTQC_cudaThreadSynchronize:
+                qcu_cudaThreadSynchronize(arg);
+                break;
 
                 ///////////////////////////////////////////////////////////////
                 ///	new cuda API (for cuda runtime 9.0
                 ///////////////////////////////////////////////////////////////
 
-                case VIRTQC_cudaDeviceCanAccessPeer:
-                    qcu_cudaDeviceCanAccessPeer(arg);
-                    break;
+            case VIRTQC_cudaDeviceCanAccessPeer:
+                qcu_cudaDeviceCanAccessPeer(arg);
+                break;
 
 #endif
             default:

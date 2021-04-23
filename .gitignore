@@ -8,4 +8,4 @@ cscope.*
 *.log
 *.status
 */build/*
-*/build/.*
+*/build/.gdbinit

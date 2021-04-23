@@ -278,8 +278,7 @@ void __cudaRegisterFunction(
 
     ptr(arg.pA, fatBinHeader, fatBinHeader->fatSize);
     ptr(arg.pB, deviceName, strlen(deviceName) + 1);
-    arg.flag = (uint32_t)(uint64_t)
-    hostFun;
+    arg.flag = (uint32_t)(uint64_t)hostFun;
 
     ptrace("pA= %p, pASize= %u, pB= %p, pBSize= %u\n",
            (void *) arg.pA, arg.pASize, (void *) arg.pB, arg.pBSize);

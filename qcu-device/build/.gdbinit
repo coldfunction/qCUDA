@@ -1,1 +1,0 @@
-/home/yb/OneDrive/vgpu/code/qCUDA/qcu-device/.gdbinit
