@@ -8,6 +8,7 @@
 #include "drivers/drivers.h"
 #include "libc/diskio.h"
 #include "libc/vsprintf.h"
+#include "libopenbios/initprogram.h"
 #include "libopenbios/ofmem.h"
 #include "libopenbios/sys_info.h"
 #include "openprom.h"
@@ -23,7 +24,7 @@ const void *romvec;
 
 static struct linux_mlist_v0 *totphyslist, *availlist, *prommaplist;
 
-static void setup_romvec(void)
+void setup_romvec(void)
 {
 	/* SPARC32 is slightly unusual in that before invoking any loaders, a romvec array
 	   needs to be set up to pass certain parameters using a C struct. Hence this function
@@ -177,7 +178,7 @@ static void setup_romvec(void)
 			(**pp).num_bytes = (intprop_ptr[4] + intprop_ptr[5]) - (intprop_ptr[1] + intprop_ptr[2]);
 		} else {
 			/* Tail (size from top of virtual memory) */
-			(**pp).num_bytes = 0xffffffffUL - (intprop_ptr[1] + intprop_ptr[2]) + 1;
+			(**pp).num_bytes = ofmem_arch_get_virt_top() - 1 - (intprop_ptr[1] + intprop_ptr[2]) + 1;
 		}
 
 		intprop_ptr += 3;
@@ -190,72 +191,16 @@ static void setup_romvec(void)
 }
 
 
-void go(void)
-{
-	ucell address, type, size;
-	int image_retval = 0;
-
-	/* Get the entry point and the type (see forth/debugging/client.fs) */
-	feval("saved-program-state >sps.entry @");
-	address = POP();
-	feval("saved-program-state >sps.file-type @");
-	type = POP();
-	feval("saved-program-state >sps.file-size @");
-	size = POP();
-
-	setup_romvec();
-
-	printk("\nJumping to entry point " FMT_ucellx " for type " FMT_ucellx "...\n", address, type);
-
-	switch (type) {
-		case 0x0:
-			/* Start ELF boot image */
-			image_retval = start_elf((unsigned long)address,
-                                                 (unsigned long)romvec);
-
-			break;
-
-		case 0x1:
-			/* Start ELF image */
-			image_retval = start_elf((unsigned long)address,
-                                                 (unsigned long)romvec);
-
-			break;
-
-		case 0x5:
-			/* Start a.out image */
-			image_retval = start_elf((unsigned long)address,
-                                                 (unsigned long)romvec);
-
-			break;
-
-		case 0x10:
-			/* Start Fcode image */
-			printk("Evaluating FCode...\n");
-			PUSH(address);
-			PUSH(1);
-			fword("byte-load");
-			image_retval = 0;
-			break;
-
-		case 0x11:
-			/* Start Forth image */
-			PUSH(address);
-			PUSH(size);
-			fword("eval2");
-			image_retval = 0;
-			break;
-	}
-
-	printk("Image returned with return value %#x\n", image_retval);
-}
-
-
 void boot(void)
 {
 	/* Boot preloaded kernel */
         if (kernel_size) {
             printk("[sparc] Kernel already loaded\n");
-            start_elf(kernel_image, (unsigned long)romvec);
+
+            PUSH(kernel_image);
+            feval("load-state >ls.entry !");
+
+            arch_init_program();
+            start_elf();
         }
 }

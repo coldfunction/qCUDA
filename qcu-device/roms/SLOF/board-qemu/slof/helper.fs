@@ -11,7 +11,7 @@
 \ ****************************************************************************/
 
 : slof-build-id  ( -- str len )
-   flash-header 10 + a
+   flash-header 10 + dup from-cstring a min
 ;
 
 : slof-revision s" 001" ;
@@ -27,9 +27,16 @@
    bdate2human $cat encode-string THEN
 ;
 
-\ Fetch C string
-: from-cstring ( addr - len )  
-  dup dup BEGIN c@ 0 <> WHILE 1 + dup REPEAT
-  swap -
+: invert-region-cs ( addr len cellsize -- )
+   >r over swap r@ rshift r> swap 1 hv-logical-memop drop
 ;
 
+: invert-region ( addr len -- )
+   2dup or 7 and CASE
+      0 OF 3 invert-region-cs ENDOF
+      4 OF 2 invert-region-cs ENDOF
+      3 and
+      2 OF 1 invert-region-cs ENDOF
+      dup OF 0 invert-region-cs ENDOF
+   ENDCASE
+;

@@ -15,9 +15,13 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA.
+ *
+ * You can also choose to distribute this program under the terms of
+ * the Unmodified Binary Distribution Licence (as given in the file
+ * COPYING.UBDL), provided that you have satisfied its requirements.
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <string.h>
 #include <ipxe/interface.h>
@@ -75,9 +79,6 @@ struct interface null_intf = INTF_INIT ( null_intf_desc );
  * The reference to the existing destination interface is dropped, a
  * reference to the new destination interface is obtained, and the
  * interface is updated to point to the new destination interface.
- *
- * Note that there is no "unplug" call; instead you must plug the
- * interface into a null interface.
  */
 void intf_plug ( struct interface *intf, struct interface *dest ) {
 	DBGC ( INTF_COL ( intf ),
@@ -109,7 +110,10 @@ void intf_plug_plug ( struct interface *a, struct interface *b ) {
  * @v intf		Object interface
  */
 void intf_unplug ( struct interface *intf ) {
-	intf_plug ( intf, &null_intf );
+	DBGC ( INTF_COL ( intf ), "INTF " INTF_INTF_FMT " unplug\n",
+	       INTF_INTF_DBG ( intf, intf->dest ) );
+	intf_put ( intf->dest );
+	intf->dest = &null_intf;
 }
 
 /**
@@ -267,6 +271,7 @@ void intf_close ( struct interface *intf, int rc ) {
  * unplugs the interface.
  */
 void intf_shutdown ( struct interface *intf, int rc ) {
+	struct interface tmp;
 
 	DBGC ( INTF_COL ( intf ), "INTF " INTF_FMT " shutting down (%s)\n",
 	       INTF_DBG ( intf ), strerror ( rc ) );
@@ -274,11 +279,50 @@ void intf_shutdown ( struct interface *intf, int rc ) {
 	/* Block further operations */
 	intf_nullify ( intf );
 
-	/* Notify destination of close */
-	intf_close ( intf, rc );
+	/* Transfer destination to temporary interface */
+	tmp.dest = intf->dest;
+	intf->dest = &null_intf;
 
-	/* Unplug interface */
-	intf_unplug ( intf );
+	/* Notify destination of close via temporary interface */
+	intf_close ( &tmp, rc );
+
+	/* Unplug temporary interface */
+	intf_unplug ( &tmp );
+}
+
+/**
+ * Shut down multiple object interfaces
+ *
+ * @v intfs		Object interfaces
+ * @v rc		Reason for close
+ */
+void intfs_vshutdown ( va_list intfs, int rc ) {
+	struct interface *intf;
+	va_list tmp;
+
+	/* Nullify all interfaces to avoid potential loops */
+	va_copy ( tmp, intfs );
+	while ( ( intf = va_arg ( tmp, struct interface * ) ) )
+		intf_nullify ( intf );
+	va_end ( tmp );
+
+	/* Shut down all interfaces */
+	while ( ( intf = va_arg ( intfs, struct interface * ) ) )
+		intf_shutdown ( intf, rc );
+}
+
+/**
+ * Shut down multiple object interfaces
+ *
+ * @v rc		Reason for close
+ * @v ...		Object interfaces
+ */
+void intfs_shutdown ( int rc, ... ) {
+	va_list intfs;
+
+	va_start ( intfs, rc );
+	intfs_vshutdown ( intfs, rc );
+	va_end ( intfs );
 }
 
 /**
@@ -291,7 +335,6 @@ void intf_shutdown ( struct interface *intf, int rc ) {
  * blocked during shutdown.
  */
 void intf_restart ( struct interface *intf, int rc ) {
-	struct interface_descriptor *desc = intf->desc;
 
 	/* Shut down the interface */
 	intf_shutdown ( intf, rc );
@@ -305,5 +348,64 @@ void intf_restart ( struct interface *intf, int rc ) {
 	 * infinite loop as the intf_close() operations on each side
 	 * of the link call each other recursively.
 	 */
-	intf->desc = desc;
+	intf_reinit ( intf );
+}
+
+/**
+ * Shut down and restart multiple object interfaces
+ *
+ * @v intfs		Object interfaces
+ * @v rc		Reason for close
+ */
+void intfs_vrestart ( va_list intfs, int rc ) {
+	struct interface *intf;
+	va_list tmp;
+
+	/* Shut down all interfaces */
+	va_copy ( tmp, intfs );
+	intfs_vshutdown ( tmp, rc );
+	va_end ( tmp );
+
+	/* Reinitialise all interfaces */
+	while ( ( intf = va_arg ( intfs, struct interface * ) ) )
+		intf_reinit ( intf );
+}
+
+/**
+ * Shut down and restart multiple object interfaces
+ *
+ * @v rc		Reason for close
+ * @v ...		Object interfaces
+ */
+void intfs_restart ( int rc, ... ) {
+	va_list intfs;
+
+	va_start ( intfs, rc );
+	intfs_vrestart ( intfs, rc );
+	va_end ( intfs );
+}
+
+/**
+ * Poke an object interface
+ *
+ * @v intf		Object interface
+ * @v type		Operation type
+ *
+ * This is a helper function to implement methods which take no
+ * parameters and return nothing.
+ */
+void intf_poke ( struct interface *intf,
+		 void ( type ) ( struct interface *intf ) ) {
+	struct interface *dest;
+	intf_poke_TYPE ( void * ) *op =
+		intf_get_dest_op_untyped ( intf, type, &dest );
+	void *object = intf_object ( dest );
+
+	if ( op ) {
+		op ( object );
+	} else {
+		/* Default is to do nothing */
+	}
+
+	intf_put ( dest );
 }

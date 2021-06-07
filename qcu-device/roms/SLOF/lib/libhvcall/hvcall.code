@@ -111,12 +111,6 @@ PRIM(hv_X2d_cas)
 	TOS.u = hv_cas(vec, buf, size);
 MIRP
 
-PRIM(hv_X2d_rtas_X2d_update)
-	unsigned long rtas_entry   = TOS.u; POP;
-	unsigned long rtas_base    = TOS.u;
-	TOS.u = hv_generic(KVMPPC_H_RTAS_UPDATE, rtas_base, rtas_entry);
-MIRP
-
 PRIM(get_X2d_print_X2d_version)
 	unsigned long addr = TOS.u; POP;
 	get_print_banner(addr);
@@ -128,4 +122,9 @@ PRIM(check_X2d_and_X2d_patch_X2d_sc1)
 	unsigned long patch_ins = TOS.u; POP;
 
 	patch_broken_sc1((void*)start, (void*)end, (void*)patch_ins);
+MIRP
+
+PRIM(hv_X2d_update_X2d_dt)
+	unsigned long dt = TOS.u;
+	TOS.u = hv_generic(KVMPPC_H_UPDATE_DT, dt);
 MIRP

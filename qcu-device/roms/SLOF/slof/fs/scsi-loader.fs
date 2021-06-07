@@ -10,16 +10,6 @@
 \ *     IBM Corporation - initial implementation
 \ ****************************************************************************/
 
-\ **************************************
-\ Last change: MiR 13.11.2007 10:55:57
-\ **************************************
-
-: .ansi-attr-off 1b emit ." [0m"  ;    \ ESC Sequence: all terminal attributes off
-: .ansi-blue     1b emit ." [34m" ;    \ ESC Sequence: foreground-color = blue
-: .ansi-green    1b emit ." [32m" ;    \ ESC Sequence: foreground-color = green
-: .ansi-red      1b emit ." [31m" ;    \ ESC Sequence: foreground-color = green
-: .ansi-bold     1b emit ." [1m"  ;    \ ESC Sequence: foreground-color bold
-
 false VALUE scsi-supp-present?
 
 : scsi-xt-err ." SCSI-ERROR (Intern) " ;
@@ -29,7 +19,6 @@ false VALUE scsi-supp-present?
 \ utility to show all active word-lists
 \ *************************************
 : .wordlists      ( -- )
-   .ansi-red
    get-order      ( -- wid1 .. widn n )
    dup space 28 emit .d ." word lists : "
    0 DO
@@ -42,21 +31,7 @@ false VALUE scsi-supp-present?
    @ 5b emit . 8 emit 5d emit
    space
    ." / Current: " current .
-   .ansi-attr-off
    cr
-;
-
-\ *************************************
-\ utility to show first word-lists
-\ *************************************
-: .context  ( num -- )
-   .ansi-red
-    space
-   5b emit
-   23 emit . 3a emit
-   context @
-   . 8 emit 5d emit space
-   .ansi-attr-off
 ;
 
 \ ****************************************************************************
@@ -73,5 +48,3 @@ false VALUE scsi-supp-present?
    THEN
    scsi-open-xt execute
 ;
-
-

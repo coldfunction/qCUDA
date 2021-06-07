@@ -15,14 +15,19 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA.
+ *
+ * You can also choose to distribute this program under the terms of
+ * the Unmodified Binary Distribution Licence (as given in the file
+ * COPYING.UBDL), provided that you have satisfied its requirements.
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <stddef.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <errno.h>
 #include <assert.h>
 #include <byteswap.h>
@@ -104,10 +109,6 @@ FEATURE ( FEATURE_PROTOCOL, "iSCSI", DHCP_EB_FEATURE_ISCSI, 1 );
 	__einfo_error ( EINFO_ENOTSUP_TARGET_STATUS )
 #define EINFO_ENOTSUP_TARGET_STATUS \
 	__einfo_uniqify ( EINFO_ENOTSUP, 0x04, "Unsupported target status" )
-#define ENOTSUP_NOP_IN \
-	__einfo_error ( EINFO_ENOTSUP_NOP_IN )
-#define EINFO_ENOTSUP_NOP_IN \
-	__einfo_uniqify ( EINFO_ENOTSUP, 0x05, "Unsupported NOP-In received" )
 #define EPERM_INITIATOR_AUTHENTICATION \
 	__einfo_error ( EINFO_EPERM_INITIATOR_AUTHENTICATION )
 #define EINFO_EPERM_INITIATOR_AUTHENTICATION \
@@ -127,7 +128,7 @@ FEATURE ( FEATURE_PROTOCOL, "iSCSI", DHCP_EB_FEATURE_ISCSI, 1 );
 #define EPROTO_INVALID_LARGE_BINARY \
 	__einfo_error ( EINFO_EPROTO_INVALID_LARGE_BINARY )
 #define EINFO_EPROTO_INVALID_LARGE_BINARY \
-	__einfo_uniqify ( EINFO_EPROTO, 0x03, "Invalid large binary" )
+	__einfo_uniqify ( EINFO_EPROTO, 0x03, "Invalid large binary value" )
 #define EPROTO_INVALID_CHAP_RESPONSE \
 	__einfo_error ( EINFO_EPROTO_INVALID_CHAP_RESPONSE )
 #define EINFO_EPROTO_INVALID_CHAP_RESPONSE \
@@ -226,9 +227,8 @@ static void iscsi_close ( struct iscsi_session *iscsi, int rc ) {
 	process_del ( &iscsi->process );
 
 	/* Shut down interfaces */
-	intf_shutdown ( &iscsi->socket, rc );
-	intf_shutdown ( &iscsi->control, rc );
-	intf_shutdown ( &iscsi->data, rc );
+	intfs_shutdown ( rc, &iscsi->socket, &iscsi->control, &iscsi->data,
+			 NULL );
 }
 
 /**
@@ -616,12 +616,15 @@ static int iscsi_rx_nop_in ( struct iscsi_session *iscsi,
 	 * sent as ping requests, but we can happily accept NOP-Ins
 	 * sent merely to update CmdSN.
 	 */
-	if ( nop_in->ttt != htonl ( ISCSI_TAG_RESERVED ) ) {
-		DBGC ( iscsi, "iSCSI %p received unsupported NOP-In with TTT "
-		       "%08x\n", iscsi, ntohl ( nop_in->ttt ) );
-		return -ENOTSUP_NOP_IN;
-	}
+	if ( nop_in->ttt == htonl ( ISCSI_TAG_RESERVED ) )
+		return 0;
 
+	/* Ignore any other NOP-Ins.  The target may eventually
+	 * disconnect us for failing to respond, but this minimises
+	 * unnecessary connection closures.
+	 */
+	DBGC ( iscsi, "iSCSI %p received unsupported NOP-In with TTT %08x\n",
+	       iscsi, ntohl ( nop_in->ttt ) );
 	return 0;
 }
 
@@ -641,12 +644,12 @@ static int iscsi_rx_nop_in ( struct iscsi_session *iscsi,
  *
  *     HeaderDigest=None
  *     DataDigest=None
- *     MaxConnections is irrelevant; we make only one connection anyway [4]
+ *     MaxConnections=1 (irrelevant; we make only one connection anyway) [4]
  *     InitialR2T=Yes [1]
- *     ImmediateData is irrelevant; we never send immediate data [4]
+ *     ImmediateData=No (irrelevant; we never send immediate data) [4]
  *     MaxRecvDataSegmentLength=8192 (default; we don't care) [3]
  *     MaxBurstLength=262144 (default; we don't care) [3]
- *     FirstBurstLength=262144 (default; we don't care)
+ *     FirstBurstLength=65536 (irrelevant due to other settings) [5]
  *     DefaultTime2Wait=0 [2]
  *     DefaultTime2Retain=0 [2]
  *     MaxOutstandingR2T=1
@@ -671,6 +674,11 @@ static int iscsi_rx_nop_in ( struct iscsi_session *iscsi,
  * these parameters, but some targets (notably a QNAP TS-639Pro) fail
  * unless they are supplied, so we explicitly specify the default
  * values.
+ *
+ * [5] FirstBurstLength is defined to be irrelevant since we already
+ * force InitialR2T=Yes and ImmediateData=No, but some targets
+ * (notably LIO as of kernel 4.11) fail unless it is specified, so we
+ * explicitly specify the default value.
  */
 static int iscsi_build_login_request_strings ( struct iscsi_session *iscsi,
 					       void *data, size_t len ) {
@@ -704,7 +712,7 @@ static int iscsi_build_login_request_strings ( struct iscsi_session *iscsi,
 		char buf[ base16_encoded_len ( iscsi->chap.response_len ) + 1 ];
 		assert ( iscsi->initiator_username != NULL );
 		base16_encode ( iscsi->chap.response, iscsi->chap.response_len,
-				buf );
+				buf, sizeof ( buf ) );
 		used += ssnprintf ( data + used, len - used,
 				    "CHAP_N=%s%cCHAP_R=0x%s%c",
 				    iscsi->initiator_username, 0, buf, 0 );
@@ -714,7 +722,7 @@ static int iscsi_build_login_request_strings ( struct iscsi_session *iscsi,
 		size_t challenge_len = ( sizeof ( iscsi->chap_challenge ) - 1 );
 		char buf[ base16_encoded_len ( challenge_len ) + 1 ];
 		base16_encode ( ( iscsi->chap_challenge + 1 ), challenge_len,
-				buf );
+				buf, sizeof ( buf ) );
 		used += ssnprintf ( data + used, len - used,
 				    "CHAP_I=%d%cCHAP_C=0x%s%c",
 				    iscsi->chap_challenge[0], 0, buf, 0 );
@@ -729,13 +737,14 @@ static int iscsi_build_login_request_strings ( struct iscsi_session *iscsi,
 				    "ImmediateData=No%c"
 				    "MaxRecvDataSegmentLength=8192%c"
 				    "MaxBurstLength=262144%c"
+				    "FirstBurstLength=65536%c"
 				    "DefaultTime2Wait=0%c"
 				    "DefaultTime2Retain=0%c"
 				    "MaxOutstandingR2T=1%c"
 				    "DataPDUInOrder=Yes%c"
 				    "DataSequenceInOrder=Yes%c"
 				    "ErrorRecoveryLevel=0%c",
-				    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
+				    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
 	}
 
 	return used;
@@ -824,38 +833,27 @@ static int iscsi_tx_login_request ( struct iscsi_session *iscsi ) {
 }
 
 /**
- * Calculate maximum length of decoded large binary value
- *
- * @v encoded		Encoded large binary value
- * @v max_raw_len	Maximum length of raw data
- */
-static inline size_t
-iscsi_large_binary_decoded_max_len ( const char *encoded ) {
-	return ( strlen ( encoded ) ); /* Decoding never expands data */
-}
-
-/**
  * Decode large binary value
  *
  * @v encoded		Encoded large binary value
  * @v raw		Raw data
+ * @v len		Length of data buffer
  * @ret len		Length of raw data, or negative error
  */
-static int iscsi_large_binary_decode ( const char *encoded, uint8_t *raw ) {
+static int iscsi_large_binary_decode ( const char *encoded, uint8_t *raw,
+				       size_t len ) {
 
-	if ( encoded[0] != '0' )
-		return -EPROTO_INVALID_LARGE_BINARY;
-
-	switch ( encoded[1] ) {
-	case 'x' :
-	case 'X' :
-		return base16_decode ( ( encoded + 2 ), raw );
-	case 'b' :
-	case 'B' :
-		return base64_decode ( ( encoded + 2 ), raw );
-	default:
-		return -EPROTO_INVALID_LARGE_BINARY;
+	/* Check for initial '0x' or '0b' and decode as appropriate */
+	if ( *(encoded++) == '0' ) {
+		switch ( tolower ( *(encoded++) ) ) {
+		case 'x' :
+			return base16_decode ( encoded, raw, len );
+		case 'b' :
+			return base64_decode ( encoded, raw, len );
+		}
 	}
+
+	return -EPROTO_INVALID_LARGE_BINARY;
 }
 
 /**
@@ -982,19 +980,19 @@ static int iscsi_handle_chap_i_value ( struct iscsi_session *iscsi,
  */
 static int iscsi_handle_chap_c_value ( struct iscsi_session *iscsi,
 				       const char *value ) {
-	uint8_t buf[ iscsi_large_binary_decoded_max_len ( value ) ];
+	uint8_t buf[ strlen ( value ) ]; /* Decoding never expands data */
 	unsigned int i;
-	size_t len;
+	int len;
 	int rc;
 
 	/* Process challenge */
-	rc = iscsi_large_binary_decode ( value, buf );
-	if ( rc < 0 ) {
+	len = iscsi_large_binary_decode ( value, buf, sizeof ( buf ) );
+	if ( len < 0 ) {
+		rc = len;
 		DBGC ( iscsi, "iSCSI %p invalid CHAP challenge \"%s\": %s\n",
 		       iscsi, value, strerror ( rc ) );
 		return rc;
 	}
-	len = rc;
 	chap_update ( &iscsi->chap, buf, len );
 
 	/* Build CHAP response */
@@ -1052,8 +1050,8 @@ static int iscsi_handle_chap_n_value ( struct iscsi_session *iscsi,
  */
 static int iscsi_handle_chap_r_value ( struct iscsi_session *iscsi,
 				       const char *value ) {
-	uint8_t buf[ iscsi_large_binary_decoded_max_len ( value ) ];
-	size_t len;
+	uint8_t buf[ strlen ( value ) ]; /* Decoding never expands data */
+	int len;
 	int rc;
 
 	/* Generate CHAP response for verification */
@@ -1073,16 +1071,16 @@ static int iscsi_handle_chap_r_value ( struct iscsi_session *iscsi,
 	chap_respond ( &iscsi->chap );
 
 	/* Process response */
-	rc = iscsi_large_binary_decode ( value, buf );
-	if ( rc < 0 ) {
+	len = iscsi_large_binary_decode ( value, buf, sizeof ( buf ) );
+	if ( len < 0 ) {
+		rc = len;
 		DBGC ( iscsi, "iSCSI %p invalid CHAP response \"%s\": %s\n",
 		       iscsi, value, strerror ( rc ) );
 		return rc;
 	}
-	len = rc;
 
 	/* Check CHAP response */
-	if ( len != iscsi->chap.response_len ) {
+	if ( len != ( int ) iscsi->chap.response_len ) {
 		DBGC ( iscsi, "iSCSI %p invalid CHAP response length\n",
 		       iscsi );
 		return -EPROTO_INVALID_CHAP_RESPONSE;
@@ -1445,8 +1443,10 @@ static void iscsi_tx_done ( struct iscsi_session *iscsi ) {
 	switch ( common->opcode & ISCSI_OPCODE_MASK ) {
 	case ISCSI_OPCODE_DATA_OUT:
 		iscsi_data_out_done ( iscsi );
+		break;
 	case ISCSI_OPCODE_LOGIN_REQUEST:
 		iscsi_login_request_done ( iscsi );
+		break;
 	default:
 		/* No action */
 		break;
@@ -1714,6 +1714,7 @@ static int iscsi_vredirect ( struct iscsi_session *iscsi, int type,
 			     va_list args ) {
 	va_list tmp;
 	struct sockaddr *peer;
+	int rc;
 
 	/* Intercept redirects to a LOCATION_SOCKET and record the IP
 	 * address for the iBFT.  This is a bit of a hack, but avoids
@@ -1729,7 +1730,15 @@ static int iscsi_vredirect ( struct iscsi_session *iscsi, int type,
 		va_end ( tmp );
 	}
 
-	return xfer_vreopen ( &iscsi->socket, type, args );
+	/* Redirect to new location */
+	if ( ( rc = xfer_vreopen ( &iscsi->socket, type, args ) ) != 0 )
+		goto err;
+
+	return 0;
+
+ err:
+	iscsi_close ( iscsi, rc );
+	return rc;
 }
 
 /** iSCSI socket interface operations */
@@ -1807,12 +1816,23 @@ static int iscsi_scsi_command ( struct iscsi_session *iscsi,
 	return iscsi->itt;
 }
 
+/**
+ * Get iSCSI ACPI descriptor
+ *
+ * @v iscsi		iSCSI session
+ * @ret desc		ACPI descriptor
+ */
+static struct acpi_descriptor * iscsi_describe ( struct iscsi_session *iscsi ) {
+
+	return &iscsi->desc;
+}
+
 /** iSCSI SCSI command-issuing interface operations */
 static struct interface_operation iscsi_control_op[] = {
 	INTF_OP ( scsi_command, struct iscsi_session *, iscsi_scsi_command ),
 	INTF_OP ( xfer_window, struct iscsi_session *, iscsi_scsi_window ),
 	INTF_OP ( intf_close, struct iscsi_session *, iscsi_close ),
-	INTF_OP ( acpi_describe, struct iscsi_session *, ibft_describe ),
+	INTF_OP ( acpi_describe, struct iscsi_session *, iscsi_describe ),
 };
 
 /** iSCSI SCSI command-issuing interface descriptor */
@@ -2061,6 +2081,7 @@ static int iscsi_open ( struct interface *parent, struct uri *uri ) {
 	intf_init ( &iscsi->socket, &iscsi_socket_desc, &iscsi->refcnt );
 	process_init_stopped ( &iscsi->process, &iscsi_process_desc,
 			       &iscsi->refcnt );
+	acpi_init ( &iscsi->desc, &ibft_model, &iscsi->refcnt );
 
 	/* Parse root path */
 	if ( ( rc = iscsi_parse_root_path ( iscsi, uri->opaque ) ) != 0 )

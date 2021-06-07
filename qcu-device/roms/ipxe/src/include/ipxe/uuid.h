@@ -6,7 +6,7 @@
  * Universally unique IDs
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <stdint.h>
 #include <byteswap.h>
@@ -47,6 +47,6 @@ static inline void uuid_mangle ( union uuid *uuid ) {
 	__bswap_16s ( &uuid->canonical.c );
 }
 
-extern char * uuid_ntoa ( const union uuid *uuid );
+extern const char * uuid_ntoa ( const union uuid *uuid );
 
 #endif /* _IPXE_UUID_H */

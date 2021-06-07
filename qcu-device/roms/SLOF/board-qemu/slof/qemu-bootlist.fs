@@ -13,7 +13,6 @@
 defer set-boot-device
 defer add-boot-device
 
-8 CONSTANT MAX-ALIAS
 : add-boot-aliases ( str -- )
     2dup add-boot-device               ( $str )
     MAX-ALIAS 1 DO
@@ -25,14 +24,24 @@ defer add-boot-device
     2drop
 ;
 
+\ strict boot order is enabled if the last word in qemu,boot-list is "HALT".
+: is-strict-boot?  ( bl-str bl-len -- strict? )
+    dup 4 > IF
+        + 5 - 5 s"  HALT" str=
+    ELSE
+        s" HALT" str=
+    THEN
+;
+
 : qemu-read-bootlist ( -- )
    \ See if QEMU has set exact boot device list
    " qemu,boot-list" get-chosen IF
-        s" boot-device" $setenv
-        EXIT
+      1-                                 \ Ignore the trailing NUL character
+      2dup set-boot-device
+      is-strict-boot? IF EXIT THEN
+   ELSE
+      0 0 set-boot-device
    THEN
-
-   0 0 set-boot-device
 
    " qemu,boot-device" get-chosen not IF
       \ No boot list set from qemu, so check nvram

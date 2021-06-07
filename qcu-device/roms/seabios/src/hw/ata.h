@@ -11,6 +11,7 @@ struct ata_channel_s {
     u16 iomaster;
     u8  irq;
     u8  chanid;
+    u8  ataid;
     int pci_bdf;
     struct pci_device *pci_tmp;
 };
@@ -24,10 +25,9 @@ struct atadrive_s {
 // ata.c
 char *ata_extract_model(char *model, u32 size, u16 *buffer);
 int ata_extract_version(u16 *buffer);
-int cdrom_read(struct disk_op_s *op);
-int atapi_cmd_data(struct disk_op_s *op, void *cdbcmd, u16 blocksize);
+int ata_process_op(struct disk_op_s *op);
+int ata_atapi_process_op(struct disk_op_s *op);
 void ata_setup(void);
-int process_ata_op(struct disk_op_s *op);
 
 #define PORT_ATA2_CMD_BASE     0x0170
 #define PORT_ATA1_CMD_BASE     0x01f0
@@ -155,4 +155,9 @@ int process_ata_op(struct disk_op_s *op);
 #define ATA_CMD_READ_NATIVE_MAX_ADDRESS      0xF8
 #define ATA_CMD_SET_MAX                      0xF9
 
+#define ATA_SET_FEATRUE_TRANSFER_MODE        0x03
+#define ATA_TRANSFER_MODE_ULTRA_DMA          0x40
+#define ATA_TRANSFER_MODE_MULTIWORD_DMA      0x20
+#define ATA_TRANSFER_MODE_PIO_FLOW_CTRL      0x08
+#define ATA_TRANSFER_MODE_DEFAULT_PIO        0x00
 #endif // ata.h

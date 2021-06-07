@@ -7,6 +7,7 @@
 #include "kernel/kernel.h"
 #include "libopenbios/bindings.h"
 #include "libopenbios/bootcode_load.h"
+#include "libopenbios/initprogram.h"
 #include "libc/diskio.h"
 #include "drivers/drivers.h"
 #define printf printk
@@ -83,17 +84,37 @@ bootcode_load(ihandle_t dev)
         size = offset;
     }
     
-    /* Initialise saved-program-state */
+    /* Initialise load-state */
     PUSH(entry);
-    feval("saved-program-state >sps.entry !");
+    feval("load-state >ls.entry !");
     PUSH(size);
-    feval("saved-program-state >sps.file-size !");
-    feval("bootcode saved-program-state >sps.file-type !");
-
-    feval("-1 state-valid !");
+    feval("load-state >ls.file-size !");
+    feval("bootcode load-state >ls.file-type !");
 
 out:
     close_io(fd);
     return retval;
 }
 
+int 
+is_bootcode(char *addr)
+{
+    /* Bootcode has no magic, and is executed directly. So we'll
+     * say that something is bootcode if the loader detected the
+     * %BOOT type sucessfully */
+    ucell filetype;
+    
+    feval("load-state >ls.file-type @");
+    filetype = POP();
+    
+    return (filetype == 0x12);
+}
+
+void
+bootcode_init_program(void)
+{
+    /* Entry point is already set, just need to setup the context */
+    arch_init_program();
+    
+    feval("-1 state-valid !");
+}

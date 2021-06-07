@@ -51,7 +51,7 @@ int setvbuf(FILE *stream, char *buf, int mode , size_t size);
 
 int putc(int ch, FILE *stream);
 int putchar(int ch);
-int puts(char *str);
+int puts(const char *str);
 
 int scanf(const char *format, ...)  __attribute__((format (scanf, 1, 2)));
 int fscanf(FILE *stream, const char *format, ...) __attribute__((format (scanf, 2, 3)));

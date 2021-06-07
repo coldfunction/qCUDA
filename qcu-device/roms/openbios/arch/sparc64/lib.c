@@ -282,6 +282,13 @@ itlb_miss_handler(void)
 	}
 }
 
+void
+prom_debug_handler(void)
+{
+	/* Execute the current debugger-hook */
+	feval("debugger-hook");
+}
+
 /*
   3.6.5 map
   ( phys.lo ... phys.hi virt size mode -- )
@@ -458,10 +465,10 @@ NODE_METHODS(mmu) = {
 void ob_mmu_init(const char *cpuname, uint64_t ram_size)
 {
     /* memory node */
-    REGISTER_NODE_METHODS(memory, "/memory");
+    REGISTER_NODE(memory);
 
     /* MMU node */
-    REGISTER_NODE_METHODS(mmu, "/virtual-memory");
+    REGISTER_NODE(mmu);
 
     ofmem_register(find_dev("/memory"), find_dev("/virtual-memory"));
 

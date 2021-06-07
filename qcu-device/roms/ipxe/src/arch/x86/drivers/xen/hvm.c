@@ -15,9 +15,13 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA.
+ *
+ * You can also choose to distribute this program under the terms of
+ * the Unmodified Binary Distribution Licence (as given in the file
+ * COPYING.UBDL), provided that you have satisfied its requirements.
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <stdint.h>
 #include <stdio.h>
@@ -62,12 +66,12 @@ static int hvm_cpuid_base ( struct hvm_device *hvm ) {
 	/* Scan for magic signature */
 	for ( base = HVM_CPUID_MIN ; base <= HVM_CPUID_MAX ;
 	      base += HVM_CPUID_STEP ) {
-		cpuid ( base, &discard_eax, &signature.ebx, &signature.ecx,
+		cpuid ( base, 0, &discard_eax, &signature.ebx, &signature.ecx,
 			&signature.edx );
 		if ( memcmp ( &signature, HVM_CPUID_MAGIC,
 			      sizeof ( signature ) ) == 0 ) {
 			hvm->cpuid_base = base;
-			cpuid ( ( base + HVM_CPUID_VERSION ), &version,
+			cpuid ( ( base + HVM_CPUID_VERSION ), 0, &version,
 				&discard_ebx, &discard_ecx, &discard_edx );
 			DBGC2 ( hvm, "HVM using CPUID base %#08x (v%d.%d)\n",
 				base, ( version >> 16 ), ( version & 0xffff ) );
@@ -97,7 +101,7 @@ static int hvm_map_hypercall ( struct hvm_device *hvm ) {
 	int rc;
 
 	/* Get number of hypercall pages and MSR to use */
-	cpuid ( ( hvm->cpuid_base + HVM_CPUID_PAGES ), &pages, &msr,
+	cpuid ( ( hvm->cpuid_base + HVM_CPUID_PAGES ), 0, &pages, &msr,
 		&discard_ecx, &discard_edx );
 
 	/* Allocate pages */
@@ -491,6 +495,9 @@ struct pci_driver hvm_driver __pci_driver = {
 	.probe = hvm_probe,
 	.remove = hvm_remove,
 };
+
+/* Drag in objects via hvm_driver */
+REQUIRING_SYMBOL ( hvm_driver );
 
 /* Drag in netfront driver */
 REQUIRE_OBJECT ( netfront );

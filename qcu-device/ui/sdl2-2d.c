@@ -23,6 +23,7 @@
  */
 /* Ported SDL 1.2 code to 2.0 by Dave Airlie. */
 
+#include "qemu/osdep.h"
 #include "qemu-common.h"
 #include "ui/console.h"
 #include "ui/input.h"
@@ -35,6 +36,8 @@ void sdl2_2d_update(DisplayChangeListener *dcl,
     struct sdl2_console *scon = container_of(dcl, struct sdl2_console, dcl);
     DisplaySurface *surf = qemu_console_surface(dcl->con);
     SDL_Rect rect;
+    size_t surface_data_offset = surface_bytes_per_pixel(surf) * x +
+                                 surface_stride(surf) * y;
 
     assert(!scon->opengl);
 
@@ -50,9 +53,11 @@ void sdl2_2d_update(DisplayChangeListener *dcl,
     rect.w = w;
     rect.h = h;
 
-    SDL_UpdateTexture(scon->texture, NULL, surface_data(surf),
+    SDL_UpdateTexture(scon->texture, &rect,
+                      surface_data(surf) + surface_data_offset,
                       surface_stride(surf));
-    SDL_RenderCopy(scon->real_renderer, scon->texture, &rect, &rect);
+    SDL_RenderClear(scon->real_renderer);
+    SDL_RenderCopy(scon->real_renderer, scon->texture, NULL, NULL);
     SDL_RenderPresent(scon->real_renderer);
 }
 
@@ -101,6 +106,9 @@ void sdl2_2d_switch(DisplayChangeListener *dcl,
         break;
     case PIXMAN_r8g8b8x8:
         format = SDL_PIXELFORMAT_RGBA8888;
+        break;
+    case PIXMAN_b8g8r8x8:
+        format = SDL_PIXELFORMAT_BGRX8888;
         break;
     default:
         g_assert_not_reached();

@@ -15,9 +15,13 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA.
+ *
+ * You can also choose to distribute this program under the terms of
+ * the Unmodified Binary Distribution Licence (as given in the file
+ * COPYING.UBDL), provided that you have satisfied its requirements.
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <stdlib.h>
 #include <string.h>
@@ -35,6 +39,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #include <ipxe/certstore.h>
 #include <ipxe/socket.h>
 #include <ipxe/in.h>
+#include <ipxe/image.h>
 #include <ipxe/x509.h>
 #include <config/crypto.h>
 
@@ -117,10 +122,10 @@ FILE_LICENCE ( GPL2_OR_LATER );
 	__einfo_uniqify ( EINFO_EACCES, 0x0b, "No usable certificates" )
 
 /**
- * Get X.509 certificate name (for debugging)
+ * Get X.509 certificate display name
  *
  * @v cert		X.509 certificate
- * @ret name		Name (for debugging)
+ * @ret name		Display name
  */
 const char * x509_name ( struct x509_certificate *cert ) {
 	struct asn1_cursor *common_name = &cert->subject.common_name;
@@ -139,7 +144,8 @@ const char * x509_name ( struct x509_certificate *cert ) {
 	} else {
 		/* Certificate has no commonName: use SHA-1 fingerprint */
 		x509_fingerprint ( cert, digest, fingerprint );
-		base16_encode ( fingerprint, sizeof ( fingerprint ), buf );
+		base16_encode ( fingerprint, sizeof ( fingerprint ),
+				buf, sizeof ( buf ) );
 	}
 	return buf;
 }
@@ -1314,7 +1320,7 @@ int x509_validate ( struct x509_certificate *cert,
 		root = &root_certificates;
 
 	/* Return success if certificate has already been validated */
-	if ( cert->valid )
+	if ( x509_is_valid ( cert ) )
 		return 0;
 
 	/* Fail if certificate is invalid at specified time */
@@ -1323,7 +1329,7 @@ int x509_validate ( struct x509_certificate *cert,
 
 	/* Succeed if certificate is a trusted root certificate */
 	if ( x509_check_root ( cert, root ) == 0 ) {
-		cert->valid = 1;
+		cert->flags |= X509_FL_VALIDATED;
 		cert->path_remaining = ( cert->extensions.basic.path_len + 1 );
 		return 0;
 	}
@@ -1336,7 +1342,7 @@ int x509_validate ( struct x509_certificate *cert,
 	}
 
 	/* Fail unless issuer has already been validated */
-	if ( ! issuer->valid ) {
+	if ( ! x509_is_valid ( issuer ) ) {
 		DBGC ( cert, "X509 %p \"%s\" ", cert, x509_name ( cert ) );
 		DBGC ( cert, "issuer %p \"%s\" has not yet been validated\n",
 		       issuer, x509_name ( issuer ) );
@@ -1370,7 +1376,7 @@ int x509_validate ( struct x509_certificate *cert,
 		cert->path_remaining = max_path_remaining;
 
 	/* Mark certificate as valid */
-	cert->valid = 1;
+	cert->flags |= X509_FL_VALIDATED;
 
 	DBGC ( cert, "X509 %p \"%s\" successfully validated using ",
 	       cert, x509_name ( cert ) );
@@ -1761,5 +1767,52 @@ int x509_validate_chain ( struct x509_chain *chain, time_t time,
 	return -EACCES_USELESS;
 }
 
+/**
+ * Extract X.509 certificate object from image
+ *
+ * @v image		Image
+ * @v offset		Offset within image
+ * @ret cert		X.509 certificate
+ * @ret next		Offset to next image, or negative error
+ *
+ * On success, the caller holds a reference to the X.509 certificate,
+ * and is responsible for ultimately calling x509_put().
+ */
+int image_x509 ( struct image *image, size_t offset,
+		 struct x509_certificate **cert ) {
+	struct asn1_cursor *cursor;
+	int next;
+	int rc;
+
+	/* Get ASN.1 object */
+	next = image_asn1 ( image, offset, &cursor );
+	if ( next < 0 ) {
+		rc = next;
+		goto err_asn1;
+	}
+
+	/* Parse certificate */
+	if ( ( rc = x509_certificate ( cursor->data, cursor->len,
+				       cert ) ) != 0 )
+		goto err_certificate;
+
+	/* Free ASN.1 object */
+	free ( cursor );
+
+	return next;
+
+	x509_put ( *cert );
+ err_certificate:
+	free ( cursor );
+ err_asn1:
+	return rc;
+}
+
+/* Drag in objects via x509_validate() */
+REQUIRING_SYMBOL ( x509_validate );
+
 /* Drag in certificate store */
 REQUIRE_OBJECT ( certstore );
+
+/* Drag in crypto configuration */
+REQUIRE_OBJECT ( config_crypto );

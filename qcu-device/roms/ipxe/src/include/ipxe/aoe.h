@@ -7,7 +7,7 @@
  *
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <stdint.h>
 #include <ipxe/list.h>
@@ -117,7 +117,7 @@ struct aoehdr {
  */
 struct abft_table {
 	/** ACPI header */
-	struct acpi_description_header acpi;
+	struct acpi_header acpi;
 	/** AoE shelf */
 	uint16_t shelf;
 	/** AoE slot */

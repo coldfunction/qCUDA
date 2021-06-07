@@ -21,41 +21,39 @@
 // On the emulators, the bios at 0xf0000 is also at 0xffff0000
 #define BIOS_SRC_OFFSET 0xfff00000
 
+union pamdata_u {
+    u8 data8[8];
+    u32 data32[2];
+};
+
 // Enable shadowing and copy bios.
 static void
 __make_bios_writable_intel(u16 bdf, u32 pam0)
 {
+    // Read in current PAM settings from pci config space
+    union pamdata_u pamdata;
+    pamdata.data32[0] = pci_config_readl(bdf, ALIGN_DOWN(pam0, 4));
+    pamdata.data32[1] = pci_config_readl(bdf, ALIGN_DOWN(pam0, 4) + 4);
+    u8 *pam = &pamdata.data8[pam0 & 0x03];
+
     // Make ram from 0xc0000-0xf0000 writable
-    int clear = 0;
     int i;
-    for (i=0; i<6; i++) {
-        u32 pam = pam0 + 1 + i;
-        int reg = pci_config_readb(bdf, pam);
-        if (CONFIG_OPTIONROMS_DEPLOYED && (reg & 0x11) != 0x11) {
-            // Need to copy optionroms to work around qemu implementation
-            void *mem = (void*)(BUILD_ROM_START + i * 32*1024);
-            memcpy((void*)BUILD_BIOS_TMP_ADDR, mem, 32*1024);
-            pci_config_writeb(bdf, pam, 0x33);
-            memcpy(mem, (void*)BUILD_BIOS_TMP_ADDR, 32*1024);
-            clear = 1;
-        } else {
-            pci_config_writeb(bdf, pam, 0x33);
-        }
-    }
-    if (clear)
-        memset((void*)BUILD_BIOS_TMP_ADDR, 0, 32*1024);
+    for (i=0; i<6; i++)
+        pam[i + 1] = 0x33;
 
     // Make ram from 0xf0000-0x100000 writable
-    int reg = pci_config_readb(bdf, pam0);
-    pci_config_writeb(bdf, pam0, 0x30);
-    if (reg & 0x10)
-        // Ram already present.
-        return;
+    int ram_present = pam[0] & 0x10;
+    pam[0] = 0x30;
 
-    // Copy bios.
-    extern u8 code32flat_start[], code32flat_end[];
-    memcpy(code32flat_start, code32flat_start + BIOS_SRC_OFFSET
-           , code32flat_end - code32flat_start);
+    // Write PAM settings back to pci config space
+    pci_config_writel(bdf, ALIGN_DOWN(pam0, 4), pamdata.data32[0]);
+    pci_config_writel(bdf, ALIGN_DOWN(pam0, 4) + 4, pamdata.data32[1]);
+
+    if (!ram_present)
+        // Copy bios.
+        memcpy(VSYMBOL(code32flat_start)
+               , VSYMBOL(code32flat_start) + BIOS_SRC_OFFSET
+               , SYMBOL(code32flat_end) - SYMBOL(code32flat_start));
 }
 
 static void
@@ -65,7 +63,7 @@ make_bios_writable_intel(u16 bdf, u32 pam0)
     if (!(reg & 0x10)) {
         // QEMU doesn't fully implement the piix shadow capabilities -
         // if ram isn't backing the bios segment when shadowing is
-        // disabled, the code itself wont be in memory.  So, run the
+        // disabled, the code itself won't be in memory.  So, run the
         // code from the high-memory flash location.
         u32 pos = (u32)__make_bios_writable_intel + BIOS_SRC_OFFSET;
         void (*func)(u16 bdf, u32 pam0) = (void*)pos;
@@ -82,6 +80,12 @@ make_bios_readonly_intel(u16 bdf, u32 pam0)
     // Flush any pending writes before locking memory.
     wbinvd();
 
+    // Read in current PAM settings from pci config space
+    union pamdata_u pamdata;
+    pamdata.data32[0] = pci_config_readl(bdf, ALIGN_DOWN(pam0, 4));
+    pamdata.data32[1] = pci_config_readl(bdf, ALIGN_DOWN(pam0, 4) + 4);
+    u8 *pam = &pamdata.data8[pam0 & 0x03];
+
     // Write protect roms from 0xc0000-0xf0000
     u32 romlast = BUILD_BIOS_ADDR, rommax = BUILD_BIOS_ADDR;
     if (CONFIG_WRITABLE_UPPERMEMORY)
@@ -91,17 +95,20 @@ make_bios_readonly_intel(u16 bdf, u32 pam0)
     int i;
     for (i=0; i<6; i++) {
         u32 mem = BUILD_ROM_START + i * 32*1024;
-        u32 pam = pam0 + 1 + i;
         if (romlast < mem + 16*1024 || rommax < mem + 32*1024) {
             if (romlast >= mem && rommax >= mem + 16*1024)
-                pci_config_writeb(bdf, pam, 0x31);
+                pam[i + 1] = 0x31;
             break;
         }
-        pci_config_writeb(bdf, pam, 0x11);
+        pam[i + 1] = 0x11;
     }
 
     // Write protect 0xf0000-0x100000
-    pci_config_writeb(bdf, pam0, 0x10);
+    pam[0] = 0x10;
+
+    // Write PAM settings back to pci config space
+    pci_config_writel(bdf, ALIGN_DOWN(pam0, 4), pamdata.data32[0]);
+    pci_config_writel(bdf, ALIGN_DOWN(pam0, 4) + 4, pamdata.data32[1]);
 }
 
 static int ShadowBDF = -1;
@@ -124,12 +131,14 @@ make_bios_writable(void)
         if (vendor == PCI_VENDOR_ID_INTEL
             && device == PCI_DEVICE_ID_INTEL_82441) {
             make_bios_writable_intel(bdf, I440FX_PAM0);
+            code_mutable_preinit();
             ShadowBDF = bdf;
             return;
         }
         if (vendor == PCI_VENDOR_ID_INTEL
             && device == PCI_DEVICE_ID_INTEL_Q35_MCH) {
             make_bios_writable_intel(bdf, Q35_HOST_BRIDGE_PAM0);
+            code_mutable_preinit();
             ShadowBDF = bdf;
             return;
         }
@@ -158,14 +167,41 @@ make_bios_readonly(void)
 }
 
 void
-qemu_prep_reset(void)
+qemu_reboot(void)
 {
     if (!CONFIG_QEMU || runningOnXen())
         return;
     // QEMU doesn't map 0xc0000-0xfffff back to the original rom on a
     // reset, so do that manually before invoking a hard reset.
-    make_bios_writable();
-    extern u8 code32flat_start[], code32flat_end[];
-    memcpy(code32flat_start, code32flat_start + BIOS_SRC_OFFSET
-           , code32flat_end - code32flat_start);
+    void *cstart = VSYMBOL(code32flat_start), *cend = VSYMBOL(code32flat_end);
+    void *hrp = &HaveRunPost;
+    if (readl(hrp + BIOS_SRC_OFFSET)) {
+        // There isn't a pristine copy of the BIOS at 0xffff0000 to copy
+        if (HaveRunPost == 3) {
+            // In a reboot loop.  Try to shutdown the machine instead.
+            dprintf(1, "Unable to hard-reboot machine - attempting shutdown.\n");
+            apm_shutdown();
+        }
+        make_bios_writable();
+        HaveRunPost = 3;
+    } else {
+        // Copy the BIOS making sure to only reset HaveRunPost at end
+        make_bios_writable();
+        memcpy(cstart, cstart + BIOS_SRC_OFFSET, hrp - cstart);
+        memcpy(hrp + 4, hrp + 4 + BIOS_SRC_OFFSET, cend - (hrp + 4));
+        barrier();
+        HaveRunPost = 0;
+        barrier();
+    }
+
+    // Request a QEMU system reset.  Do the reset in this function as
+    // the BIOS code was overwritten above and not all BIOS
+    // functionality may be available.
+
+    // Attempt PCI style reset
+    outb(0x02, PORT_PCI_REBOOT);
+    outb(0x06, PORT_PCI_REBOOT);
+
+    // Next try triple faulting the CPU to force a reset
+    asm volatile("int3");
 }

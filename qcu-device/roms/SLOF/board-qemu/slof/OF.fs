@@ -50,7 +50,7 @@ hex
 : mm-log-warning 2drop ;
 
 : write-mm-log ( data length type -- status )
-	3drop 0
+    3drop 0
 ;
 
 100 cp
@@ -70,15 +70,7 @@ cistack ciregs >r1 ! \ kernel wants a stack :-)
 
 200 cp
 
-#include <slof-logo.fs>
-
-201 cp
-
 #include <banner.fs>
-
-: .banner .slof-logo .banner ;
-
-220 cp
 
 DEFER find-boot-sector ( -- )
 
@@ -92,10 +84,6 @@ d# 512000000 VALUE tb-frequency   \ default value - needed for "ms" to work
 260 cp
 
 #include <timebase.fs>
-
-270 cp
-
-#include <fcode/evaluator.fs>
 
 2e0 cp
 
@@ -120,23 +108,21 @@ d# 512000000 VALUE tb-frequency   \ default value - needed for "ms" to work
 370 cp
 
 : check-boot-menu
-   s" qemu,boot-menu" get-chosen IF
-      decode-int 1 = IF
-         ." Press F12 for boot menu." cr cr
-      THEN
-      2drop
-   THEN
+    s" qemu,boot-menu" get-chosen IF
+        decode-int 1 = IF
+            ." Press F12 for boot menu." cr cr
+        THEN
+        2drop
+    THEN
 ;
 check-boot-menu
 
 380 cp
 
+#include "fdt-fl.fs"
+
 \ Grab rtas from qemu
 #include "rtas.fs"
-
-390 cp
-
-#include "virtio.fs"
 
 3f0 cp
 
@@ -167,41 +153,51 @@ check-for-nvramrc
 CREATE version-str 10 ALLOT
 0 value temp-ptr
 
+: dump-display-write
+    s" screen" find-alias  IF
+        drop terminal-write drop
+    ELSE
+        s" vsterm" find-alias  IF
+            drop type
+        THEN
+    THEN
+;
+
 : dump-display-buffer
     disp-ptr to temp-ptr
-    " SLOF **********************************************************************" terminal-write drop
+    " SLOF **********************************************************************" dump-display-write
     cr
     version-str get-print-version
     version-str @                   \ start
     version-str 8 + @               \ end
-    over - terminal-write drop
-    " Press 's' to enter Open Firmware." terminal-write drop
+    over - dump-display-write
+    " Press 's' to enter Open Firmware." dump-display-write
     cr cr
     temp-ptr disp-size > IF
-	temp-ptr disp-size MOD
-	dup
-	prevga-disp-buf + swap disp-size swap - terminal-write drop
-	temp-ptr disp-size MOD
-	prevga-disp-buf swap 1 - terminal-write drop
+        temp-ptr disp-size MOD
+        dup
+        prevga-disp-buf + swap disp-size swap - dump-display-write
+        temp-ptr disp-size MOD
+        prevga-disp-buf swap 1 - dump-display-write
     ELSE
-	prevga-disp-buf temp-ptr terminal-write drop
+        prevga-disp-buf temp-ptr dump-display-write
     THEN
 ;
 
 : enable-framebuffer-output  ( -- )
-\ enable output on framebuffer
-   s" screen" find-alias ?dup  IF
-      \ we need to open/close the screen device once
-      \ before "ticking" display-emit to emit
-      open-dev close-node
-      false to store-prevga?
-      s" display-emit" $find  IF 
-         to emit 
-	 dump-display-buffer
-      ELSE
-         2drop
-      THEN
-   THEN
+    \ enable output on framebuffer
+    s" screen" find-alias ?dup  IF
+        \ we need to open/close the screen device once
+        \ before "ticking" display-emit to emit
+        open-dev close-node
+        false to store-prevga?
+        s" display-emit" $find  IF
+            to emit
+            dump-display-buffer
+        ELSE
+            2drop
+        THEN
+    THEN
 ;
 
 enable-framebuffer-output
@@ -228,25 +224,54 @@ romfs-base 400000 0 ' claim CATCH IF ." claim failed!" cr 2drop THEN drop
         ." No console specified "
         " screen" find-alias dup IF nip THEN
         " keyboard" find-alias dup IF nip THEN
-	AND IF
-	  ." using screen & keyboard" cr
-	  " screen" output
-	  " keyboard" input
+        AND IF
+            ." using screen "
+            s" direct-serial?" evaluate IF
+                ." & hvterm"
+                s" hvterm" input
+            ELSE
+                ." & keyboard"
+                s" keyboard" input
+            THEN
+            cr
+            s" screen" output
         ELSE
-          " hvterm" find-alias IF
-	    drop
-	    ." using hvterm" cr
-            " hvterm" io
-	  ELSE
-	    " /openprom" find-node ?dup IF
-		set-node
-		." and no default found, creating dev-null" cr
-		" dev-null.fs" included
-		" devnull-console" io
-		0 set-node
-	    THEN
-	  THEN
+            " hvterm" find-alias IF
+                drop
+                ." using hvterm" cr
+                " hvterm" io
+            ELSE
+                " vsterm" find-alias IF
+                    drop
+                    ." using vsterm" cr
+                    " vsterm" io
+                    false to store-prevga?
+                    dump-display-buffer
+                ELSE
+                    " /openprom" find-node ?dup IF
+                        set-node
+                        ." and no default found, creating dev-null" cr
+                        " dev-null.fs" included
+                        " devnull-console" io
+                        0 set-node
+                    THEN
+                THEN
+            THEN
         THEN
+    THEN
+
+    s" input-device" evaluate dup IF
+        ." User selected input-device console: " 2dup type cr
+        input
+    ELSE
+        2drop
+    THEN
+
+    s" output-device" evaluate dup IF
+        ." User selected output-device console: " 2dup type cr
+        output
+    ELSE
+        2drop
     THEN
 ;
 set-default-console
@@ -262,10 +287,10 @@ set-default-console
 : (boot-ram)
     direct-ram-boot-size 0<> IF
         ." Booting from memory..." cr
-	s" go-args 2@ " evaluate
-	direct-ram-boot-base 0
-	s" true state-valid ! " evaluate
-	s" disable-watchdog go-64" evaluate
+        s" go-args 2@ " evaluate
+        direct-ram-boot-base 0
+        s" true state-valid ! " evaluate
+        s" disable-watchdog go-64" evaluate
     THEN
 ;
 
@@ -274,15 +299,15 @@ set-default-console
 : check-boot-from-ram
     s" qemu,boot-kernel" get-chosen IF
         decode-int -rot decode-int -rot ( n1 n2 p s )
-	decode-int -rot decode-int -rot ( n1 n2 n3 n4 p s )
-	2drop
-	swap 20 << or to direct-ram-boot-size
-	swap 20 << or to direct-ram-boot-base
-	." Detected RAM kernel at " direct-ram-boot-base .
-	." (" direct-ram-boot-size . ." bytes) "
-	\ Override the boot-command word without touching the
-	\ nvram environment
-	s" boot-command" $create " (boot-ram)" env-string
+        decode-int -rot decode-int -rot ( n1 n2 n3 n4 p s )
+        2drop
+        swap 20 << or to direct-ram-boot-size
+        swap 20 << or to direct-ram-boot-base
+        ." Detected RAM kernel at " direct-ram-boot-base .
+        ." (" direct-ram-boot-size . ." bytes) " cr
+        \ Override the boot-command word without touching the
+        \ nvram environment
+        s" boot-command" $create " (boot-ram)" env-string
     THEN
 ;
 check-boot-from-ram
@@ -302,5 +327,11 @@ cr cr
 
 \ this CATCH is to ensure the code bellow always executes:  boot may ABORT!
 ' start-it CATCH drop
+
+: boot
+    boot
+    \ When we return from boot print the banner again.
+    .banner
+;
 
 cr ." Ready!"

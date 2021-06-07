@@ -4,7 +4,7 @@
  *   This driver is compliant to the
  *   PCI bus binding to IEEE 1275-1994 Rev 2.1
  *
- *   (C) 2004 Stefan Reinauer <stepan@openbios.org>
+ *   (C) 2004 Stefan Reinauer
  *   (C) 2005 Ed Schouten <ed@fxq.nl>
  *
  *   Some parts from OpenHackWare-0.4, Copyright (c) 2004-2005 Jocelyn Mayer
@@ -49,7 +49,8 @@
 /* DECLARE data structures for the nodes.  */
 
 DECLARE_UNNAMED_NODE( ob_pci_bus_node, INSTALL_OPEN, 2*sizeof(int) );
-DECLARE_UNNAMED_NODE( ob_pci_simple_node, INSTALL_OPEN, 2*sizeof(int) );
+DECLARE_UNNAMED_NODE( ob_pci_bridge_node, INSTALL_OPEN, 2*sizeof(int) );
+DECLARE_UNNAMED_NODE( ob_pci_simple_node, 0, 2*sizeof(int) );
 DECLARE_UNNAMED_NODE( ob_pci_empty_node, 0, 2*sizeof(int) );
 
 const pci_arch_t *arch;
@@ -57,13 +58,6 @@ const pci_arch_t *arch;
 #define IS_NOT_RELOCATABLE	0x80000000
 #define IS_PREFETCHABLE		0x40000000
 #define IS_ALIASED		0x20000000
-
-enum {
-	CONFIGURATION_SPACE = 0,
-	IO_SPACE = 1,
-	MEMORY_SPACE_32 = 2,
-	MEMORY_SPACE_64 = 3,
-};
 
 static int encode_int32_cells(int num_cells, u32 *prop, ucell val)
 {
@@ -144,9 +138,40 @@ static void dump_reg_property(const char* description, int nreg, u32 *reg)
 }
 #endif
 
-static unsigned long pci_bus_addr_to_host_addr(uint32_t ba)
+static unsigned long pci_bus_addr_to_host_addr(int space, uint32_t ba)
 {
-    return arch->host_pci_base + (unsigned long)ba;
+    if (space == IO_SPACE) {
+        return arch->io_base + (unsigned long)ba;
+    } else if (space == MEMORY_SPACE_32) {
+        return arch->host_pci_base + (unsigned long)ba;
+    } else {
+        /* Return unaltered to aid debugging property values */
+        return (unsigned long)ba;
+    }
+}
+
+static inline void pci_decode_pci_addr(pci_addr addr, int *flags,
+                                       int *space_code, uint32_t *mask)
+{
+    *flags = 0;
+
+    if (addr & 0x01) {
+        *space_code = IO_SPACE;
+        *mask = 0x00000001;
+    } else {
+        if (addr & 0x04) {
+            *space_code = MEMORY_SPACE_64;
+            *flags |= IS_NOT_RELOCATABLE; /* XXX: why not relocatable? */
+        } else {
+            *space_code = MEMORY_SPACE_32;
+        }
+
+        if (addr & 0x08) {
+            *flags |= IS_PREFETCHABLE;
+        }
+
+        *mask = 0x0000000F;
+    }
 }
 
 static void
@@ -174,7 +199,7 @@ ob_pci_decode_unit(int *idx)
 	ucell hi, mid, lo;
 	const char *arg = pop_fstr_copy();
 	int dev, fn, reg, ss, n, p, t;
-	int bus = 0;		/* no information */
+	int bus, len;
 	char *ptr;
 
 	PCI_DPRINTF("ob_pci_decode_unit idx=%p\n", idx);
@@ -266,6 +291,8 @@ ob_pci_decode_unit(int *idx)
 	}
 	free((char*)arg);
 
+	bus = get_int_property(get_cur_dev(), "bus-range", &len);
+
 	hi = n | p | t | (ss << 24) | (bus << 16) | (dev << 11) | (fn << 8) | reg;
 
 	PUSH(lo);
@@ -340,23 +367,20 @@ ob_pci_encode_unit(int *idx)
 	        ss, dev, fn, buf);
 }
 
-/* ( pci-addr.lo pci-addr.hi size -- virt ) */
-
-static void
-ob_pci_map_in(int *idx)
-{
+/* Map PCI MMIO or IO space from the BAR address. Note it is up to the caller
+   to understand whether the resulting address is in MEM or IO space and
+   use the appropriate accesses */
+static ucell ob_pci_map(uint32_t ba, ucell size) {
 	phys_addr_t phys;
-	uint32_t ba;
-	ucell size, virt;
+	uint32_t mask;
+	int flags, space_code;
+	ucell virt;
+	
+	pci_decode_pci_addr(ba, &flags, &space_code, &mask);
 
-	PCI_DPRINTF("ob_pci_bar_map_in idx=%p\n", idx);
-
-	size = POP();
-	POP();
-	ba = POP();
-
-	phys = pci_bus_addr_to_host_addr(ba);
-
+	phys = pci_bus_addr_to_host_addr(space_code,
+			ba & ~mask);
+	
 #if defined(CONFIG_OFMEM)
 	ofmem_claim_phys(phys, size, 0);
 
@@ -374,6 +398,33 @@ ob_pci_map_in(int *idx)
 	virt = phys;
 #endif
 
+	return virt;
+}
+
+static void ob_pci_unmap(ucell virt, ucell size) {
+#if defined(CONFIG_OFMEM)
+	ofmem_unmap(virt, size); 
+#endif
+}
+
+/* ( pci-addr.lo pci-addr.mid pci-addr.hi size -- virt ) */
+
+static void
+ob_pci_bus_map_in(int *idx)
+{
+	uint32_t ba;
+	ucell size;
+	ucell virt;
+
+	PCI_DPRINTF("ob_pci_bar_map_in idx=%p\n", idx);
+
+	size = POP();
+	POP();
+	POP();
+	ba = POP();
+
+	virt = ob_pci_map(ba, size);
+
 	PUSH(virt);
 }
 
@@ -383,11 +434,28 @@ NODE_METHODS(ob_pci_bus_node) = {
 	{ "close",		ob_pci_close		},
 	{ "decode-unit",	ob_pci_decode_unit	},
 	{ "encode-unit",	ob_pci_encode_unit	},
-	{ "pci-map-in",		ob_pci_map_in		},
+	{ "pci-map-in",		ob_pci_bus_map_in	},
+};
+
+/* ( pci-addr.lo pci-addr.mid pci-addr.hi size -- virt ) */
+
+static void
+ob_pci_bridge_map_in(int *idx)
+{
+	/* As per the IEEE-1275 PCI specification, chain up to the parent */
+	call_parent_method("pci-map-in");
+}
+
+NODE_METHODS(ob_pci_bridge_node) = {
+	{ NULL,			ob_pci_initialize	},
+	{ "open",		ob_pci_open		},
+	{ "close",		ob_pci_close		},
+	{ "decode-unit",	ob_pci_decode_unit	},
+	{ "encode-unit",	ob_pci_encode_unit	},
+	{ "pci-map-in",		ob_pci_bridge_map_in	},
 };
 
 NODE_METHODS(ob_pci_simple_node) = {
-	{ NULL,			ob_pci_initialize	},
 	{ "open",		ob_pci_open		},
 	{ "close",		ob_pci_close		},
 };
@@ -445,36 +513,24 @@ static void pci_host_set_ranges(const pci_config_t *config)
 {
 	phandle_t dev = get_cur_dev();
 	u32 props[32];
-	int ncells;
-
-	ncells = 0;
-	/* first encode PCI configuration space */
-	{
-	    ncells += pci_encode_phys_addr(props + ncells, 0, CONFIGURATION_SPACE,
-                     config->dev, 0, 0);
-        ncells += host_encode_phys_addr(props + ncells, arch->cfg_addr);
-        ncells += pci_encode_size(props + ncells, arch->cfg_len);
+	int ncells = 0;
+	pci_range_t range;
+	int i;
+	
+	for (i = 0; i < 4; i++) {
+		range = arch->host_ranges[i];
+	    
+		/* End of range list reached */
+		if (range.type == 0x0 && range.len == 0x0) {
+			break;
+		}
+	
+		ncells += pci_encode_phys_addr(props + ncells, 0, range.type,
+						0, 0, range.parentaddr);
+		ncells += host_encode_phys_addr(props + ncells, range.childaddr);
+		ncells += pci_encode_size(props + ncells, range.len);
 	}
-
-	if (arch->io_base) {
-	    ncells += pci_encode_phys_addr(props + ncells, 0, IO_SPACE,
-				     config->dev, 0, 0);
-        ncells += host_encode_phys_addr(props + ncells, arch->io_base);
-        ncells += pci_encode_size(props + ncells, arch->io_len);
-	}
-	if (arch->rbase) {
-	    ncells += pci_encode_phys_addr(props + ncells, 0, MEMORY_SPACE_32,
-				     config->dev, 0, 0);
-        ncells += host_encode_phys_addr(props + ncells, arch->rbase);
-        ncells += pci_encode_size(props + ncells, arch->rlen);
-	}
-	if (arch->pci_mem_base) {
-	    ncells += pci_encode_phys_addr(props + ncells, 0, MEMORY_SPACE_32,
-				     config->dev, 0, arch->pci_mem_base);
-        ncells += host_encode_phys_addr(props + ncells, arch->host_pci_base +
-				     arch->pci_mem_base);
-	ncells += pci_encode_size(props + ncells, arch->mem_len);
-	}
+	
 	set_property(dev, "ranges", (char *)props, ncells * sizeof(props[0]));
 }
 
@@ -490,6 +546,17 @@ int host_config_cb(const pci_config_t *config)
 static int sabre_configure(phandle_t dev)
 {
         uint32_t props[28];
+
+        /* Sabre has a custom reg property from the default */
+        props[0] = 0x1fe;
+        props[1] = 0x0;
+        props[2] = 0x0;
+        props[3] = 0x10000;
+        props[4] = 0x1fe;
+        props[5] = 0x1000000;
+        props[6] = 0x0;
+        props[7] = 0x100;
+        set_property(dev, "reg", (char *)props, 8 * sizeof(props[0]));
 
         props[0] = 0xc0000000;
         props[1] = 0x20000000;
@@ -529,6 +596,65 @@ int bridge_config_cb(const pci_config_t *config)
 	return 0;
 }
 
+int simba_config_cb(const pci_config_t *config)
+{
+    u32 props[128];
+    int ncells = 0;
+
+    bridge_config_cb(config);
+
+    /* Configure the simba ranges as per the mostly undocumented
+       PCI config register in Linux's apb_fake_ranges():
+      
+       pci@1,1 (pciA):
+           IO: 0x1fe02000000-0x1fe027fffff
+          MEM: 0x1ff20000000-0x1ff5fffffff
+          
+       pci@1 (pciB):
+           IO: 0x1fe02800000-0x1fe02ffffff
+          MEM: 0x1ff60000000-0x1ff9fffffff
+    */
+
+    switch (PCI_FN(config->dev)) {
+    case 1:
+        /* IO: 0x1fe02000000-0x1fe027fffff */
+        pci_config_write8(config->dev, 0xde, 0x0f);
+
+        /* MEM: 0x1ff20000000-0x1ff5fffffff */
+        pci_config_write8(config->dev, 0xdf, 0x06);
+
+        /* Onboard NIC: slot 1, intno 0x21 */
+        ncells += pci_encode_phys_addr(props + ncells, 0, 0, PCI_ADDR(1, 1, 0), 0, 0);
+        props[ncells++] = 0x1;
+        props[ncells++] = find_dev("/pci");
+        props[ncells++] = 0x21;
+
+        /* Onboard IDE: slot 3, intno 0x20 */
+        ncells += pci_encode_phys_addr(props + ncells, 0, 0, PCI_ADDR(1, 3, 0), 0, 0);
+        props[ncells++] = 0x1;
+        props[ncells++] = find_dev("/pci");
+        props[ncells++] = 0x20;
+        set_property(get_cur_dev(), "interrupt-map", (char *)props, ncells * sizeof(props[0]));
+
+        props[0] = 0x00fff800;
+        props[1] = 0x0;
+        props[2] = 0x0;
+        props[3] = 0x7;
+        set_property(get_cur_dev(), "interrupt-map-mask", (char *)props, 4 * sizeof(props[0]));
+        break;
+
+    case 0:
+        /* IO: 0x1fe02800000-0x1fe02ffffff */
+        pci_config_write8(config->dev, 0xde, 0xf0);
+
+        /* MEM: 0x1ff60000000-0x1ff9fffffff */
+        pci_config_write8(config->dev, 0xdf, 0x18);
+        break;
+    }
+
+    return 0;
+}
+
 int ide_config_cb2 (const pci_config_t *config)
 {
 	ob_ide_init(config->path,
@@ -550,28 +676,58 @@ int eth_config_cb (const pci_config_t *config)
         return 0;
 }
 
-static inline void pci_decode_pci_addr(pci_addr addr, int *flags,
-				       int *space_code, uint32_t *mask)
+int sunhme_config_cb(const pci_config_t *config)
 {
-    *flags = 0;
+	phandle_t ph = get_cur_dev();
+	
+	set_int_property(ph, "hm-rev", 0x21);
+	
+	return eth_config_cb(config);
+}
 
-	if (addr & 0x01) {
-		*space_code = IO_SPACE;
-		*mask = 0x00000001;
-	} else {
-	    if (addr & 0x04) {
-            *space_code = MEMORY_SPACE_64;
-            *flags |= IS_NOT_RELOCATABLE; /* XXX: why not relocatable? */
-        } else {
-            *space_code = MEMORY_SPACE_32;
-        }
-
-        if (addr & 0x08) {
-            *flags |= IS_PREFETCHABLE;
-        }
-
-        *mask = 0x0000000F;
+int rtl8139_config_cb(const pci_config_t *config)
+{
+#ifdef CONFIG_PPC
+	/* Apple's OF seemingly enables bus mastering on some cards by
+	 * default, which means that some buggy drivers forget to
+	 * explicitly set it (OS X, MorphOS). Mimic this behaviour so
+	 * that these buggy drivers work under emulation. */
+	if (is_apple()) {
+		ob_pci_enable_bus_master(config);
 	}
+#endif
+
+	return eth_config_cb(config);
+}
+
+int sungem_config_cb (const pci_config_t *config)
+{
+	phandle_t ph = get_cur_dev();
+	uint32_t val, *mmio;
+	uint8_t mac[6];
+	ucell virt;
+
+#define MAC_ADDR0	(0x6080UL/4)	/* MAC Address 0 Register	*/
+#define MAC_ADDR1	(0x6084UL/4)	/* MAC Address 1 Register	*/
+#define MAC_ADDR2	(0x6088UL/4)	/* MAC Address 2 Register	*/
+
+	/* Map PCI memory BAR 0 to access the sungem registers */
+	virt = ob_pci_map(config->assigned[0], 0x8000);
+	mmio = (void *)(uintptr_t)virt;
+	
+	val = __le32_to_cpu(*(mmio + MAC_ADDR0));
+	mac[5] = val & 0xff;
+	mac[4] = (val >> 8) & 0xff;
+	val = __le32_to_cpu(*(mmio + MAC_ADDR1));
+	mac[3] = val & 0xff;
+	mac[2] = (val >> 8) & 0xff;
+	val = __le32_to_cpu(*(mmio + MAC_ADDR2));
+	mac[1] = val & 0xff;
+	mac[0] = (val >> 8) & 0xff;
+	set_property(ph, "local-mac-address", (char *)mac, 6);
+	
+	ob_pci_unmap(virt, 0x8000);
+	return 0;
 }
 
 /*
@@ -585,13 +741,18 @@ static void pci_set_AAPL_address(const pci_config_t *config)
 {
 	phandle_t dev = get_cur_dev();
 	cell props[7];
-	int ncells, i;
+	uint32_t mask;
+	int ncells, i, flags, space_code;
 
 	ncells = 0;
 	for (i = 0; i < 6; i++) {
 		if (!config->assigned[i] || !config->sizes[i])
 			continue;
-		props[ncells++] = config->assigned[i] & ~0x0000000F;
+		pci_decode_pci_addr(config->assigned[i],
+				    &flags, &space_code, &mask);
+
+		props[ncells++] = pci_bus_addr_to_host_addr(space_code,
+					config->assigned[i] & ~mask);
 	}
 	if (ncells)
 		set_property(dev, "AAPL,address", (char *)props,
@@ -634,10 +795,7 @@ static void ob_pci_reload_device_path(phandle_t phandle, pci_config_t *config)
 {
     /* since "name" and "reg" are now assigned
        we need to reload current node name */
-
-    PUSH(phandle);
-    fword("get-package-path");
-    char *new_path = pop_fstr_copy();
+    char *new_path = get_path_from_ph(phandle);
     if (new_path) {
         if (0 != strcmp(config->path, new_path)) {
             PCI_DPRINTF("\n=== CHANGED === package path old=%s new=%s\n",
@@ -751,36 +909,50 @@ int macio_keylargo_config_cb (const pci_config_t *config)
 
 int vga_config_cb (const pci_config_t *config)
 {
+#ifdef CONFIG_PPC
         unsigned long rom;
-        uint32_t rom_size, size;
+        uint32_t rom_size, size, bar;
         phandle_t ph;
-
+#endif
         if (config->assigned[0] != 0x00000000) {
             setup_video();
 
-            rom = pci_bus_addr_to_host_addr(config->assigned[1] & ~0x0000000F);
-            rom_size = config->sizes[1];
+#ifdef CONFIG_PPC
+            if (config->assigned[6]) {
+                    rom = pci_bus_addr_to_host_addr(MEMORY_SPACE_32,
+                                                    config->assigned[6] & ~0x0000000F);
+                    rom_size = config->sizes[6];
 
-            ph = get_cur_dev();
+                    bar = pci_config_read32(config->dev, PCI_ROM_ADDRESS);
+                    bar |= PCI_ROM_ADDRESS_ENABLE;
+                    pci_config_write32(config->dev, PCI_COMMAND, bar);
+                    ph = get_cur_dev();
 
-            if (rom_size >= 8) {
-                const char *p;
+                    if (rom_size >= 8) {
+                            const char *p;
 
-                p = (const char *)rom;
-                if (p[0] == 'N' && p[1] == 'D' && p[2] == 'R' && p[3] == 'V') {
-                    size = *(uint32_t*)(p + 4);
-                    set_property(ph, "driver,AAPL,MacOS,PowerPC", p + 8, size);
-                }
+                            p = (const char *)rom;
+                            if (p[0] == 'N' && p[1] == 'D' && p[2] == 'R' && p[3] == 'V') {
+                                    size = *(uint32_t*)(p + 4);
+                                    set_property(ph, "driver,AAPL,MacOS,PowerPC",
+                                                 p + 8, size);
+                            } else if (p[0] == 'J' && p[1] == 'o' &&
+                                       p[2] == 'y' && p[3] == '!') {
+                                    set_property(ph, "driver,AAPL,MacOS,PowerPC",
+                                                 p, rom_size);
+                            }
+                    }
             }
+#endif
 
-            /* Currently we don't read FCode from the hardware but execute it directly */
+            /* Currently we don't read FCode from the hardware but execute
+             * it directly */
             feval("['] vga-driver-fcode 2 cells + 1 byte-load");
 
 #ifdef CONFIG_MOL
-	    /* Install special words for Mac On Linux */
-	    molvideo_init();
+            /* Install special words for Mac On Linux */
+            molvideo_init();
 #endif
-
         }
 
 	return 0;
@@ -795,13 +967,24 @@ int ebus_config_cb(const pci_config_t *config)
     int i;
     uint32_t mask;
     int flags, space_code;
+    ucell virt;
+    phys_addr_t io_phys_base = 0;
 
+    /* Serial */
     props[0] = 0x14;
     props[1] = 0x3f8;
     props[2] = 1;
-    props[3] = find_dev("/");
+    props[3] = find_dev("/pci");
     props[4] = 0x2b;
-    set_property(dev, "interrupt-map", (char *)props, 5 * sizeof(props[0]));
+    
+    /* PS2 keyboard */
+    props[5] = 0x14;
+    props[6] = 0x60;
+    props[7] = 1;
+    props[8] = find_dev("/pci");
+    props[9] = 0x29;
+    
+    set_property(dev, "interrupt-map", (char *)props, 10 * sizeof(props[0]));
 
     props[0] = 0x000001ff;
     props[1] = 0xffffffff;
@@ -824,9 +1007,14 @@ int ebus_config_cb(const pci_config_t *config)
         ncells += pci_encode_phys_addr(props + ncells,
                                        flags, space_code, config->dev,
                                        PCI_BASE_ADDR_0 + (i * sizeof(uint32_t)),
-                                       0);
+                                       config->assigned[i] & ~mask);
 
         props[ncells++] = config->sizes[i];
+
+        /* Store base of IO space for NVRAM */
+        if (io_phys_base == 0x0 && space_code == IO_SPACE) {
+            io_phys_base = pci_bus_addr_to_host_addr(space_code, config->assigned[i] & ~mask);
+        }
     }
 
     set_property(dev, "ranges", (char *)props, ncells * sizeof(props[0]));
@@ -847,7 +1035,48 @@ int ebus_config_cb(const pci_config_t *config)
     push_str("mk48t59");
     fword("model");
 
+    /* OpenSolaris (e.g. Milax) requires the RTC to be pre-mapped by the PROM */
+    virt = ofmem_map_io(io_phys_base + 0x2000, 0x2000);
+    PUSH(virt);
+    fword("encode-int");
+    push_str("address");
+    fword("property");
+    
     push_str("eeprom");
+    fword("device-name");
+    fword("finish-device");
+
+    /* Build power node */
+    fword("new-device");
+    PUSH(0x14);
+    fword("encode-int");
+    PUSH(0x7240);
+    fword("encode-int");
+    fword("encode+");
+    PUSH(0x4);
+    fword("encode-int");
+    fword("encode+");
+    push_str("reg");
+    fword("property");
+
+    PUSH(0);
+    PUSH(0);
+    push_str("button");
+    fword("property");
+
+    PUSH(1);
+    fword("encode-int");
+    push_str("interrupts");
+    fword("property");
+
+    /* Map the power registers so we can use them */
+    virt = ofmem_map_io(io_phys_base + 0x7240, 0x4);
+    PUSH(virt);
+    fword("encode-int");
+    push_str("address");
+    fword("property");
+
+    push_str("power");
     fword("device-name");
     fword("finish-device");
 
@@ -858,7 +1087,7 @@ int ebus_config_cb(const pci_config_t *config)
     ob_pc_serial_init(config->path, "su", (PCI_BASE_ADDR_1 | 0ULL) << 32, 0x3f8ULL, 0);
 #endif
 #ifdef CONFIG_DRIVER_PC_KBD
-    ob_pc_kbd_init(config->path, "kb_ps2", (PCI_BASE_ADDR_1 | 0ULL) << 32, 0x60ULL, 0);
+    ob_pc_kbd_init(config->path, "kb_ps2", NULL, (PCI_BASE_ADDR_1 | 0ULL) << 32, 0x60ULL, 1, 0);
 #endif
 #endif
     return 0;
@@ -870,7 +1099,7 @@ int i82378_config_cb(const pci_config_t *config)
     ob_pc_serial_init(config->path, "serial", arch->io_base, 0x3f8ULL, 0);
 #endif
 #ifdef CONFIG_DRIVER_PC_KBD
-    ob_pc_kbd_init(config->path, "8042", arch->io_base, 0x60ULL, 0);
+    ob_pc_kbd_init(config->path, "8042", NULL, arch->io_base, 0x60ULL, 0, 0);
 #endif
 #ifdef CONFIG_DRIVER_IDE
     ob_ide_init(config->path, 0x1f0, 0x3f6, 0x170, 0x376);
@@ -885,6 +1114,18 @@ int usb_ohci_config_cb(const pci_config_t *config)
     ob_usb_ohci_init(config->path, 0x80000000 | config->dev);
 #endif
     return 0;
+}
+
+void ob_pci_enable_bus_master(const pci_config_t *config)
+{
+	/* Enable bus mastering for the PCI device */
+	uint16_t cmd;
+	pci_addr addr = PCI_ADDR(
+		PCI_BUS(config->dev), PCI_DEV(config->dev), PCI_FN(config->dev));
+
+	cmd = pci_config_read16(addr, PCI_COMMAND);
+	cmd |= PCI_COMMAND_BUS_MASTER;
+	pci_config_write16(addr, PCI_COMMAND, cmd);
 }
 
 static void ob_pci_add_properties(phandle_t phandle,
@@ -997,7 +1238,9 @@ static void ob_pci_add_properties(phandle_t phandle,
 	}
 
 	pci_set_assigned_addresses(phandle, config, num_bars);
-	OLDWORLD(pci_set_AAPL_address(config));
+
+	if (is_apple() && is_oldworld())
+		pci_set_AAPL_address(config);
 
 	PCI_DPRINTF("\n");
 }
@@ -1126,9 +1369,9 @@ ob_pci_configure(pci_addr addr, pci_config_t *config, int num_regs, int rom_bar,
                  unsigned long *mem_base, unsigned long *io_base)
 
 {
-        uint32_t omask;
+        uint32_t omask, mask;
         uint16_t cmd;
-        int reg;
+        int reg, flags, space_code;
         pci_addr config_addr;
 
         ob_pci_configure_irq(addr, config);
@@ -1140,6 +1383,14 @@ ob_pci_configure(pci_addr addr, pci_config_t *config, int num_regs, int rom_bar,
                 ob_pci_configure_bar(addr, config, reg, config_addr,
                                      &omask, mem_base,
                                      io_base);
+
+                /* Ignore 64-bit BAR MSBs (always map in 32-bit space) */
+                pci_decode_pci_addr(config->assigned[reg],
+                                    &flags, &space_code, &mask);
+
+                if (space_code == MEMORY_SPACE_64) {
+                    reg++;
+                }
         }
 
         if (rom_bar) {
@@ -1152,7 +1403,7 @@ ob_pci_configure(pci_addr addr, pci_config_t *config, int num_regs, int rom_bar,
         pci_config_write16(addr, PCI_COMMAND, cmd);
 }
 
-static void ob_configure_pci_device(const char* parent_path,
+static phandle_t ob_configure_pci_device(const char* parent_path,
         int *bus_num, unsigned long *mem_base, unsigned long *io_base,
         int bus, int devnum, int fn, int *p_is_multi);
 
@@ -1174,11 +1425,79 @@ static void ob_scan_pci_bus(int *bus_num, unsigned long *mem_base,
 	}
 }
 
+#if defined(CONFIG_SPARC64)
+
+/* Convert device/irq pin to interrupt property */
+#define SUN4U_PCIAINTERRUPT(dev, irq_pin) \
+            ((((dev >> 11) << 2) + irq_pin - 1) & 0x1f)
+            
+#define SUN4U_PCIBINTERRUPT(dev, irq_pin) \
+            ((0x10 + (((dev >> 11) << 2) + irq_pin - 1)) & 0x1f)
+
+static void ob_pci_simbaB_bus_interrupt(ucell dnode, u32 *props, int *ncells, u32 addr, u32 intno)
+{
+    *ncells += pci_encode_phys_addr(props + *ncells, 0, 0, addr, 0, 0);
+    props[(*ncells)++] = intno;
+    props[(*ncells)++] = dnode;
+    props[(*ncells)++] = SUN4U_PCIBINTERRUPT(addr, intno);
+}
+
+static void ob_pci_bus_set_interrupt_map(phandle_t pcibus, phandle_t dnode,
+              void (*func)(ucell dnode, u32 *props, int *ncells, u32 addr, u32 intno));
+
+static void ob_scan_sabre_pci_bus(int *bus_num, unsigned long *mem_base,
+                            unsigned long *io_base, const char *path,
+                            int bus)
+{
+	int devnum, fn, is_multi;
+	phandle_t ph;
+
+	PCI_DPRINTF("\nScanning sabre bus %d at %s...\n", bus, path);
+	
+	/* Horrible sabre hack: the PCI bridge with the on-board devices
+	   is located at devfn (1,1) so if we use the standard scan function
+	   we end up with our ioports not mapped at io_base == 0x0 which
+	   breaks many assumptions in OpenBIOS. Hence do a custom scan for
+	   sabre which does things in the right order. */
+	for (devnum = 0; devnum < 32; devnum++) {
+		is_multi = 0;
+		
+		if (devnum == 1) {
+			/* Force io_base/mem_base to match the pciA simba range */
+			*io_base = 0x0;       /* because of arch->iobase */
+			*mem_base = 0x20000000;
+			
+			ob_configure_pci_device(path, bus_num, mem_base, io_base,
+				bus, 1, 1, &is_multi);
+			
+			/* Force io_base/mem_base to match the pciB simba range */
+			*io_base = 0x800000;  /* because of arch->iobase */
+			*mem_base = 0x60000000;
+			
+			ph = ob_configure_pci_device(path, bus_num, mem_base, io_base,
+				bus, 1, 0, &is_multi);
+			
+			/* Set up pciB interrupt map */
+                        ob_pci_bus_set_interrupt_map(ph, find_dev("/pci"), ob_pci_simbaB_bus_interrupt);
+		} else {
+			for (fn = 0; fn==0 || (is_multi && fn<8); fn++) {
+				ob_configure_pci_device(path, bus_num, mem_base, io_base,
+					bus, devnum, fn, &is_multi);
+			}
+		}
+	}
+}
+#endif
+
 static void ob_configure_pci_bridge(pci_addr addr,
                                     int *bus_num, unsigned long *mem_base,
                                     unsigned long *io_base,
                                     int primary_bus, pci_config_t *config)
 {
+    unsigned long old_mem_base, old_io_base, io_scan_limit;
+    uint16_t cmd;
+    phandle_t ph;
+
     config->primary_bus = primary_bus;
     pci_config_write8(addr, PCI_PRIMARY_BUS, config->primary_bus);
 
@@ -1191,11 +1510,55 @@ static void ob_configure_pci_bridge(pci_addr addr,
     PCI_DPRINTF("scanning new pci bus %u under bridge %s\n",
             config->secondary_bus, config->path);
 
-    /* make pci bridge parent device, prepare for recursion */
+    /* Temporarily add bus-range property to allow the secondary bus to
+       determine its bus num */
+    ph = find_dev(config->path);
+    set_int_property(ph, "bus-range", *bus_num);
 
+    /* Always expose the legacy ioports on the first PCI bridge. If we
+       must have legacy devices behind a PCI bridge then they must be
+       on the first one discovered to ensure that the ioports will work. */
+    if (primary_bus > 0 && *io_base < 0x1000) {
+        *io_base = 0x0;
+    }
+
+    /* Align mem_base up to nearest MB, io_base up to nearest 4K */
+    old_mem_base = (*mem_base + 0xfffff - 1) & ~(0xfffff - 1);
+    *mem_base = old_mem_base;
+    old_io_base = (*io_base + 0xfff - 1) & ~(0xfff - 1);
+    *io_base = old_io_base;
+
+    /* Set the base limit registers */
+    pci_config_write16(addr, PCI_MEMORY_BASE, ((*mem_base >> 16) & ~(0xf)));
+    pci_config_write16(addr, PCI_IO_BASE_UPPER, (*io_base >> 16));
+    pci_config_write8(addr, PCI_IO_BASE, ((*io_base >> 8) & ~(0xf)));
+
+    /* Always ensure legacy ioports are accessible during enumeration.
+       Some drivers (e.g. IDE) will attempt ioport access as part of
+       the configuration process, so we allow them during the secondary
+       bus scan and then set the correct IO limit below. */
+    io_scan_limit = *io_base + (0xffff - *io_base);
+    pci_config_write16(addr, PCI_IO_LIMIT_UPPER, (io_scan_limit >> 16));
+    pci_config_write8(addr, PCI_IO_LIMIT, (io_scan_limit >> 8) & ~(0xf));
+
+    /* make pci bridge parent device, prepare for recursion */
+    
+#if defined(CONFIG_SPARC64)
+    /* Horrible hack for sabre */
+    int vid = pci_config_read16(addr, PCI_VENDOR_ID);
+    int did = pci_config_read16(addr, PCI_DEVICE_ID);
+
+    if (vid == PCI_VENDOR_ID_SUN && did == PCI_DEVICE_ID_SUN_SABRE) {
+        ob_scan_sabre_pci_bus(bus_num, mem_base, io_base,
+                        config->path, config->secondary_bus);       
+    } else {
+        ob_scan_pci_bus(bus_num, mem_base, io_base,
+                        config->path, config->secondary_bus);
+    }
+#else
     ob_scan_pci_bus(bus_num, mem_base, io_base,
                     config->path, config->secondary_bus);
-
+#endif
     /* bus scan updates *bus_num to last revealed pci bus number */
     config->subordinate_bus = *bus_num;
     pci_config_write8(addr, PCI_SUBORDINATE_BUS, config->subordinate_bus);
@@ -1203,6 +1566,25 @@ static void ob_configure_pci_bridge(pci_addr addr,
     PCI_DPRINTF("bridge %s PCI bus primary=%d secondary=%d subordinate=%d\n",
             config->path, config->primary_bus, config->secondary_bus,
             config->subordinate_bus);
+
+    /* Align mem_base up to nearest MB, io_base up to nearest 4K */
+    *mem_base = (*mem_base + 0xfffff - 1) & ~(0xfffff - 1);
+    *io_base = (*io_base + 0xfff - 1) & ~(0xfff - 1);
+
+    /* Set the limit registers */
+    pci_config_write16(addr, PCI_MEMORY_LIMIT, (((*mem_base - 1) >> 16) & ~(0xf)));
+    pci_config_write16(addr, PCI_IO_LIMIT_UPPER, ((*io_base - 1) >> 16));
+    pci_config_write8(addr, PCI_IO_LIMIT, (((*io_base - 1) >> 8) & ~(0xf)));
+
+    /* Disable unused address spaces */
+    cmd = pci_config_read16(addr, PCI_COMMAND);
+    if (*mem_base == old_mem_base) {
+        pci_config_write16(addr, PCI_COMMAND, (cmd & ~PCI_COMMAND_MEMORY));
+    }
+
+    if (*io_base == old_io_base) {
+        pci_config_write16(addr, PCI_COMMAND, (cmd & ~PCI_COMMAND_IO));
+    }
 
     pci_set_bus_range(config);
 }
@@ -1248,7 +1630,7 @@ static int ob_pci_read_identification(int bus, int devnum, int fn,
     return 1;
 }
 
-static void ob_configure_pci_device(const char* parent_path,
+static phandle_t ob_configure_pci_device(const char* parent_path,
         int *bus_num, unsigned long *mem_base, unsigned long *io_base,
         int bus, int devnum, int fn, int *p_is_multi)
 {
@@ -1264,7 +1646,7 @@ static void ob_configure_pci_device(const char* parent_path,
     int is_host_bridge = 0;
 
     if (!ob_pci_read_identification(bus, devnum, fn, &vid, &did, &class, &subclass)) {
-        return;
+        return 0;
     }
 
     addr = PCI_ADDR(bus, devnum, fn);
@@ -1313,14 +1695,11 @@ static void ob_configure_pci_device(const char* parent_path,
     switch (class) {
     case PCI_BASE_CLASS_BRIDGE:
         if (subclass != PCI_SUBCLASS_BRIDGE_HOST) {
-            REGISTER_NAMED_NODE_PHANDLE(ob_pci_bus_node, config.path, phandle);
+            REGISTER_NAMED_NODE_PHANDLE(ob_pci_bridge_node, config.path, phandle);
         }
         break;
-    case PCI_CLASS_DISPLAY:
-	REGISTER_NAMED_NODE_PHANDLE(ob_pci_empty_node, config.path, phandle);
-	break;
     default:
-        REGISTER_NAMED_NODE_PHANDLE(ob_pci_simple_node, config.path, phandle);
+        REGISTER_NAMED_NODE_PHANDLE(ob_pci_empty_node, config.path, phandle);
         break;
     }
 
@@ -1329,7 +1708,7 @@ static void ob_configure_pci_device(const char* parent_path,
 
         if (get_property(phandle, "vendor-id", NULL)) {
             PCI_DPRINTF("host bridge already configured\n");
-            return;
+            return 0;
         }
     }
 
@@ -1358,6 +1737,11 @@ static void ob_configure_pci_device(const char* parent_path,
         pci_dev->config_cb(&config);
     }
 
+    /* if devices haven't supplied open/close words then supply them with simple defaults */
+    if (!find_package_method("open", phandle) && !find_package_method("close", phandle)) {
+        REGISTER_NODE_METHODS(ob_pci_simple_node, config.path);
+    }
+
     /* device is configured so we may move it out of scope */
     device_end();
 
@@ -1374,6 +1758,8 @@ static void ob_configure_pci_device(const char* parent_path,
 
         ob_configure_pci_bridge(addr, bus_num, mem_base, io_base, bus, &config);
     }
+
+    return phandle;
 }
 
 static void ob_pci_set_available(phandle_t host, unsigned long mem_base, unsigned long io_base)
@@ -1391,115 +1777,158 @@ static void ob_pci_set_available(phandle_t host, unsigned long mem_base, unsigne
     set_property(host, "available", (char *)props, ncells * sizeof(props[0]));
 }
 
-/* Convert device/irq pin to interrupt property */
-#define SUN4U_INTERRUPT(dev, irq_pin) \
-            ((((dev >> 11) << 2) + irq_pin - 1) & 0x1f)
-
-static void ob_pci_host_set_interrupt_map(phandle_t host)
-{
-    phandle_t dnode = 0;
-    u32 props[128];
-    int i;
-
 #if defined(CONFIG_PPC)
-    phandle_t target_node;
+static phandle_t ob_pci_host_set_interrupt_map(phandle_t host)
+{
+    /* Set the host bridge interrupt map, returning the phandle
+       of the interrupt controller */
+    phandle_t dnode, target_node;
+    char *path, buf[256];
 
     /* Oldworld macs do interrupt maps differently */
     if (!is_newworld())
-        return;
+        return 0;
 
+    PCI_DPRINTF("setting up interrupt map for host %x\n", host);
     dnode = dt_iterate_type(0, "open-pic");
-    if (dnode) {
+    path = get_path_from_ph(host);
+    if (dnode && path) {
         /* patch in openpic interrupt-parent properties */
-        target_node = find_dev("/pci/mac-io");
+        snprintf(buf, sizeof(buf), "%s/mac-io", path);
+        target_node = find_dev(buf);
         set_int_property(target_node, "interrupt-parent", dnode);
 
-        target_node = find_dev("/pci/mac-io/escc/ch-a");
+        snprintf(buf, sizeof(buf), "%s/mac-io/escc/ch-a", path);
+        target_node = find_dev(buf);
         set_int_property(target_node, "interrupt-parent", dnode);
 
-        target_node = find_dev("/pci/mac-io/escc/ch-b");
+        snprintf(buf, sizeof(buf), "%s/mac-io/escc/ch-b", path);
+        target_node = find_dev(buf);
+        set_int_property(target_node, "interrupt-parent", dnode);
+
+        snprintf(buf, sizeof(buf), "%s/mac-io/escc-legacy/ch-a", path);
+        target_node = find_dev(buf);
+        set_int_property(target_node, "interrupt-parent", dnode);
+
+        snprintf(buf, sizeof(buf), "%s/mac-io/escc-legacy/ch-b", path);
+        target_node = find_dev(buf);
         set_int_property(target_node, "interrupt-parent", dnode);
 
         /* QEMU only emulates 2 of the 3 ata buses currently */
         /* On a new world Mac these are not numbered but named by the
          * ATA version they support. Thus we have: ata-3, ata-3, ata-4
          * On g3beige they all called just ide.
-         * We take ata-3 and ata-4 which seems to work for both
-         * at least for clients we care about */
-        target_node = find_dev("/pci/mac-io/ata-3");
+         * We take 2 x ata-3 buses which seems to work for
+         * at least the clients we care about */
+        snprintf(buf, sizeof(buf), "%s/mac-io/ata-3@20000", path);
+        target_node = find_dev(buf);
         set_int_property(target_node, "interrupt-parent", dnode);
 
-        target_node = find_dev("/pci/mac-io/ata-4");
+        snprintf(buf, sizeof(buf), "%s/mac-io/ata-3@21000", path);
+        target_node = find_dev(buf);
         set_int_property(target_node, "interrupt-parent", dnode);
 
-        target_node = find_dev("/pci/mac-io/via-cuda");
+        snprintf(buf, sizeof(buf), "%s/mac-io/via-cuda", path);
+        target_node = find_dev(buf);
         set_int_property(target_node, "interrupt-parent", dnode);
 
-        target_node = find_dev("/pci");
+        target_node = find_dev(path);
         set_int_property(target_node, "interrupt-parent", dnode);
 
-        /* openpic interrupt mapping */
-        for (i = 0; i < (7*8); i += 7) {
-            props[i + PCI_INT_MAP_PCI0] = 0;
-            props[i + PCI_INT_MAP_PCI1] = 0;
-            props[i + PCI_INT_MAP_PCI2] = 0;
-            props[i + PCI_INT_MAP_PCI_INT] = (i / 7) + 1; // starts at PINA=1
-            props[i + PCI_INT_MAP_PIC_HANDLE] = dnode;
-            props[i + PCI_INT_MAP_PIC_INT] = arch->irqs[i / 7];
-            props[i + PCI_INT_MAP_PIC_POL] = 3;
-        }
-        set_property(host, "interrupt-map", (char *)props, 7 * 8 * sizeof(props[0]));
-
-        props[PCI_INT_MAP_PCI0] = 0;
-        props[PCI_INT_MAP_PCI1] = 0;
-        props[PCI_INT_MAP_PCI2] = 0;
-        props[PCI_INT_MAP_PCI_INT] = 0x7;
-
-        set_property(host, "interrupt-map-mask", (char *)props, 4 * sizeof(props[0]));
+        return dnode;
     }
+
+    return host;
+}
+
+static void ob_pci_host_bus_interrupt(ucell dnode, u32 *props, int *ncells, u32 addr, u32 intno)
+{
+    *ncells += pci_encode_phys_addr(props + *ncells, 0, 0, addr, 0, 0);
+    props[(*ncells)++] = intno;
+    props[(*ncells)++] = dnode;
+    props[(*ncells)++] = arch->irqs[((intno - 1) + (addr >> 11)) & 3];
+    props[(*ncells)++] = 1;
+}
+
 #elif defined(CONFIG_SPARC64)
-    int ncells, len;
+            
+static phandle_t ob_pci_host_set_interrupt_map(phandle_t host)
+{
+    return host;
+}
+           
+static void ob_pci_host_bus_interrupt(ucell dnode, u32 *props, int *ncells, u32 addr, u32 intno)
+{
+    /* Note: this is invalid when the Simba bridges are in place
+       as it is impossible to physically plug hardware into the PCI
+       root bus (and no hardware support for mapping these interrupts
+       either) */
+    return;
+}
+
+#else
+
+static phandle_t ob_pci_host_set_interrupt_map(phandle_t host)
+{
+    return host;
+}
+
+static void ob_pci_host_bus_interrupt(ucell dnode, u32 *props, int *ncells, u32 addr, u32 intno)
+{
+    return;
+}
+#endif
+
+static void ob_pci_bus_set_interrupt_map(phandle_t pcibus, phandle_t dnode,
+              void (*func)(ucell dnode, u32 *props, int *ncells, u32 addr, u32 intno))
+{
+    /* Set interrupt-map for PCI devices with an interrupt pin present */
+    phandle_t pci_childnode = 0;
+    u32 props[128], intno;
+    int i, ncells = 0, len;
     u32 *val, addr;
     char *reg;
+    
+    /* If no destination node specified, do nothing */
+    if (dnode == 0) {
+        return;
+    }
 
-    /* Set interrupt-map for PCI devices with an interrupt pin present */
-    ncells = 0;
-
-    PUSH(host);
+    PUSH(pcibus);
     fword("child");
-    dnode = POP();
-    while (dnode) {
-        if (get_int_property(dnode, "interrupts", &len)) {
-            reg = get_property(dnode, "reg", &len);
-            if (reg) {
+    pci_childnode = POP();
+    while (pci_childnode) {
+        intno = get_int_property(pci_childnode, "interrupts", &len);
+        if (len && intno) {
+            reg = get_property(pci_childnode, "reg", &len);
+            if (len && reg) {
                 val = (u32 *)reg;
 
                 for (i = 0; i < (len / sizeof(u32)); i += 5) {
                     addr = val[i];
 
                     /* Device address is in 1st 32-bit word of encoded PCI address for config space */
-                    if (!(addr & 0x03000000)) {
-                        ncells += pci_encode_phys_addr(props + ncells, 0, 0, addr, 0, 0);
-                        props[ncells++] = 1;    /* always interrupt pin 1 for QEMU */
-                        props[ncells++] = host;
-                        props[ncells++] = SUN4U_INTERRUPT(addr, 1);
+                    if ((addr & PCI_RANGE_TYPE_MASK) == PCI_RANGE_CONFIG) {
+                        (*func)(dnode, props, &ncells, addr, intno);
                     }
                 }
             }
         }
 
-        PUSH(dnode);
+        PUSH(pci_childnode);
         fword("peer");
-        dnode = POP();
+        pci_childnode = POP();
     }
-    set_property(host, "interrupt-map", (char *)props, ncells * sizeof(props[0]));
 
-    props[0] = 0x0000f800;
-    props[1] = 0x0;
-    props[2] = 0x0;
-    props[3] = 7;
-    set_property(host, "interrupt-map-mask", (char *)props, 4 * sizeof(props[0]));
-#endif
+    if (ncells) {
+        set_property(pcibus, "interrupt-map", (char *)props, ncells * sizeof(props[0]));
+
+        props[0] = 0x00fff800;
+        props[1] = 0x0;
+        props[2] = 0x0;
+        props[3] = 0x7;
+        set_property(pcibus, "interrupt-map-mask", (char *)props, 4 * sizeof(props[0]));
+    }
 }
 
 int ob_pci_init(void)
@@ -1509,7 +1938,7 @@ int ob_pci_init(void)
     unsigned long mem_base, io_base;
 
     pci_config_t config = {}; /* host bridge */
-    phandle_t phandle_host = 0;
+    phandle_t phandle_host = 0, intc;
 
     PCI_DPRINTF("Initializing PCI host bridge...\n");
 
@@ -1561,7 +1990,8 @@ int ob_pci_init(void)
     ob_pci_set_available(phandle_host, mem_base, io_base);
 
     /* configure the host bridge interrupt map */
-    ob_pci_host_set_interrupt_map(phandle_host);
+    intc = ob_pci_host_set_interrupt_map(phandle_host);
+    ob_pci_bus_set_interrupt_map(phandle_host, intc, ob_pci_host_bus_interrupt);
 
     device_end();
 

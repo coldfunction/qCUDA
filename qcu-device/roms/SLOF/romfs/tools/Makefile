@@ -22,7 +22,7 @@ include $(TOPCMNDIR)/make.rules
 CPPFLAGS = -I$(INCLCMNDIR) -I$(INCLBRDDIR) -I.
 CFLAGS += $(FLAG)
 
-SRCS = build_ffs.c cfg_parse.c create_flash.c create_crc.c
+SRCS = build_ffs.c cfg_parse.c create_flash.c create_crc.c crclib.c
 OBJS = $(SRCS:%.c=%.o)
 
 all: build_romfs

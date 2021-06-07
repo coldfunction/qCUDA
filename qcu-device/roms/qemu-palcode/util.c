@@ -20,20 +20,20 @@
 
 #include "protos.h"
 
+static inline long
+ndelay_with_int(unsigned long nsec)
+{
+  register long a0 __asm__("16") = nsec;
+  register long v0 __asm__("0");
+  asm volatile ("call_pal 3" : "=r"(v0) : "r"(a0));
+  return v0;
+}
 
 void
 ndelay(unsigned long nsec)
 {
-  unsigned long target, now;
-
-  /* ??? Fix race between setting an alarm and waiting for an interrupt,
-     so that we can use wtint here.  This isn't used much except for 
-     during startup, so it probably doesn't matter much.  */
-
-  now = get_wall_time();
-  target = now + nsec;
-
-  do
-    now = get_wall_time();
-  while (now < target);
+  long left = nsec;
+  do {
+    left = ndelay_with_int(left);
+  } while (left > 0);
 }

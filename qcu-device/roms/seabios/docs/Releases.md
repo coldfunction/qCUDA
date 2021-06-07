@@ -1,6 +1,80 @@
 History of SeaBIOS releases. Please see [download](Download) for
 information on obtaining these releases.
 
+SeaBIOS 1.11.0
+==============
+
+Available on 20171110. Major changes in this release:
+
+* Initial support for NVME drives
+* Support for vga emulation over a serial port in SeaBIOS (sercon)
+* Support for serial debugging using MMIO based serial ports
+* Support for scsi devices with multiple LUNs
+* Support for boot-to-boot persistent coreboot cbmem logs
+* Improved coreboot vga (cbvga) mode setting compatibility
+* Several bug fixes and code cleanups
+
+SeaBIOS 1.10.0
+==============
+
+Available on 20161026. Major changes in this release:
+
+* Initial support for Trusted Platform Module (TPM) version 2.0
+* Several USB XHCI timing fixes on real hardware
+* Support for "LSI MPT Fusion" scsi controllers on QEMU
+* Support for virtio devices mapped above 4GB
+* Several bug fixes and code cleanups
+
+SeaBIOS 1.10.1
+--------------
+
+Available on 20161122. Stable release containing only bug fixes.
+
+
+SeaBIOS 1.10.2
+--------------
+
+Available on 20170228. Stable release containing only bug fixes.
+
+SeaBIOS 1.10.3
+--------------
+
+Available on 20171019. Stable release containing only bug fixes.
+
+SeaBIOS 1.9.0
+=============
+
+Available on 20151117. Major changes in this release:
+
+* The default boot menu key is now the ESC key (instead of F12)
+* Initial support for Trusted Platform Module (TPM) hardware and BIOS calls
+* Initial support for chain loading SeaBIOS from Grub (via multiboot
+  support)
+* Initial support for booting from SD cards on real hardware
+* virtio 1.0 device support
+* The build will no longer include the build hostname or build time on
+  "clean" builds.  This makes the build binaries more "reproducible".
+* Basic support for running SeaBIOS on Baytrail Chromebooks
+* SeaVGABIOS improvements:
+    * Improved support for old versions of x86emu (the "leal"
+      instruction is now emulated)
+* Several bug fixes and code cleanups
+
+SeaBIOS 1.9.1
+-------------
+
+Available on 20160215. Stable release containing only bug fixes.
+
+SeaBIOS 1.9.2
+-------------
+
+Available on 20160422. Stable release containing only bug fixes.
+
+SeaBIOS 1.9.3
+-------------
+
+Available on 20160701. Stable release containing only bug fixes.
+
 SeaBIOS 1.8.0
 =============
 
@@ -22,6 +96,16 @@ As of the 1.8.0 release, new feature releases will modify the first
 two release numbers (eg, 1.8) and stable releases will use three
 numbers (eg, 1.8.1). The prior behavior of using a forth number
 (eg, 1.7.5.1) for stable releases will no longer be used.
+
+SeaBIOS 1.8.1
+-------------
+
+Available on 20150316. Stable release containing only bug fixes.
+
+SeaBIOS 1.8.2
+-------------
+
+Available on 20150617. Stable release containing only bug fixes.
 
 SeaBIOS 1.7.5
 =============

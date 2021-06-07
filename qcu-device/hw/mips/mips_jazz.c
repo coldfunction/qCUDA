@@ -22,11 +22,14 @@
  * THE SOFTWARE.
  */
 
+#include "qemu/osdep.h"
 #include "hw/hw.h"
 #include "hw/mips/mips.h"
 #include "hw/mips/cpudevs.h"
 #include "hw/i386/pc.h"
+#include "hw/dma/i8257.h"
 #include "hw/char/serial.h"
+#include "hw/char/parallel.h"
 #include "hw/isa/isa.h"
 #include "hw/block/fdc.h"
 #include "sysemu/sysemu.h"
@@ -38,12 +41,15 @@
 #include "hw/loader.h"
 #include "hw/timer/mc146818rtc.h"
 #include "hw/timer/i8254.h"
+#include "hw/display/vga.h"
 #include "hw/audio/pcspk.h"
-#include "sysemu/block-backend.h"
+#include "hw/input/i8042.h"
 #include "hw/sysbus.h"
 #include "exec/address-spaces.h"
 #include "sysemu/qtest.h"
+#include "qapi/error.h"
 #include "qemu/error-report.h"
+#include "qemu/help_option.h"
 
 enum jazz_model_e
 {
@@ -104,15 +110,6 @@ static const MemoryRegionOps dma_dummy_ops = {
 #define MAGNUM_BIOS_SIZE_MAX 0x7e000
 #define MAGNUM_BIOS_SIZE (BIOS_SIZE < MAGNUM_BIOS_SIZE_MAX ? BIOS_SIZE : MAGNUM_BIOS_SIZE_MAX)
 
-static void cpu_request_exit(void *opaque, int irq, int level)
-{
-    CPUState *cpu = current_cpu;
-
-    if (cpu && level) {
-        cpu_exit(cpu);
-    }
-}
-
 static CPUUnassignedAccess real_do_unassigned_access;
 static void mips_jazz_do_unassigned_access(CPUState *cpu, hwaddr addr,
                                            bool is_write, bool is_exec,
@@ -129,7 +126,6 @@ static void mips_jazz_init(MachineState *machine,
                            enum jazz_model_e jazz_model)
 {
     MemoryRegion *address_space = get_system_memory();
-    const char *cpu_model = machine->cpu_model;
     char *filename;
     int bios_size, n;
     MIPSCPU *cpu;
@@ -137,7 +133,7 @@ static void mips_jazz_init(MachineState *machine,
     CPUMIPSState *env;
     qemu_irq *i8259;
     rc4030_dma *dmas;
-    MemoryRegion *rc4030_dma_mr;
+    IOMMUMemoryRegion *rc4030_dma_mr;
     MemoryRegion *isa_mem = g_new(MemoryRegion, 1);
     MemoryRegion *isa_io = g_new(MemoryRegion, 1);
     MemoryRegion *rtc = g_new(MemoryRegion, 1);
@@ -150,20 +146,13 @@ static void mips_jazz_init(MachineState *machine,
     ISADevice *pit;
     DriveInfo *fds[MAX_FD];
     qemu_irq esp_reset, dma_enable;
-    qemu_irq *cpu_exit_irq;
     MemoryRegion *ram = g_new(MemoryRegion, 1);
     MemoryRegion *bios = g_new(MemoryRegion, 1);
     MemoryRegion *bios2 = g_new(MemoryRegion, 1);
+    ESPState *esp;
 
     /* init CPUs */
-    if (cpu_model == NULL) {
-        cpu_model = "R4000";
-    }
-    cpu = cpu_mips_init(cpu_model);
-    if (cpu == NULL) {
-        fprintf(stderr, "Unable to find CPU definition\n");
-        exit(1);
-    }
+    cpu = MIPS_CPU(cpu_create(machine->cpu_type));
     env = &cpu->env;
     qemu_register_reset(main_cpu_reset, cpu);
 
@@ -184,8 +173,7 @@ static void mips_jazz_init(MachineState *machine,
     memory_region_add_subregion(address_space, 0, ram);
 
     memory_region_init_ram(bios, NULL, "mips_jazz.bios", MAGNUM_BIOS_SIZE,
-                           &error_abort);
-    vmstate_register_ram_global(bios);
+                           &error_fatal);
     memory_region_set_readonly(bios, true);
     memory_region_init_alias(bios2, NULL, "mips_jazz.bios", bios,
                              0, MAGNUM_BIOS_SIZE);
@@ -209,8 +197,8 @@ static void mips_jazz_init(MachineState *machine,
     }
 
     /* Init CPU internal devices */
-    cpu_mips_irq_init_cpu(env);
-    cpu_mips_clock_init(env);
+    cpu_mips_irq_init_cpu(cpu);
+    cpu_mips_clock_init(cpu);
 
     /* Chipset */
     rc4030 = rc4030_init(&dmas, &rc4030_dma_mr);
@@ -229,14 +217,13 @@ static void mips_jazz_init(MachineState *machine,
     memory_region_init(isa_mem, NULL, "isa-mem", 0x01000000);
     memory_region_add_subregion(address_space, 0x90000000, isa_io);
     memory_region_add_subregion(address_space, 0x91000000, isa_mem);
-    isa_bus = isa_bus_new(NULL, isa_mem, isa_io);
+    isa_bus = isa_bus_new(NULL, isa_mem, isa_io, &error_abort);
 
     /* ISA devices */
     i8259 = i8259_init(isa_bus, env->irq[4]);
     isa_bus_irqs(isa_bus, i8259);
-    cpu_exit_irq = qemu_allocate_irqs(cpu_request_exit, NULL, 1);
-    DMA_init(0, cpu_exit_irq);
-    pit = pit_init(isa_bus, 0x40, 0, NULL);
+    i8257_dma_init(isa_bus, 0);
+    pit = i8254_pit_init(isa_bus, 0x40, 0, NULL);
     pcspk_init(isa_bus, pit);
 
     /* Video card */
@@ -252,8 +239,7 @@ static void mips_jazz_init(MachineState *machine,
             /* Simple ROM, so user doesn't have to provide one */
             MemoryRegion *rom_mr = g_new(MemoryRegion, 1);
             memory_region_init_ram(rom_mr, NULL, "g364fb.rom", 0x80000,
-                                   &error_abort);
-            vmstate_register_ram_global(rom_mr);
+                                   &error_fatal);
             memory_region_set_readonly(rom_mr, true);
             uint8_t *rom = memory_region_get_ram_ptr(rom_mr);
             memory_region_add_subregion(address_space, 0x60000000, rom_mr);
@@ -286,31 +272,28 @@ static void mips_jazz_init(MachineState *machine,
             sysbus_connect_irq(sysbus, 0, qdev_get_gpio_in(rc4030, 4));
             break;
         } else if (is_help_option(nd->model)) {
-            fprintf(stderr, "qemu: Supported NICs: dp83932\n");
+            error_report("Supported NICs: dp83932");
             exit(1);
         } else {
-            fprintf(stderr, "qemu: Unsupported NIC: %s\n", nd->model);
+            error_report("Unsupported NIC: %s", nd->model);
             exit(1);
         }
     }
 
     /* SCSI adapter */
-    esp_init(0x80002000, 0,
-             rc4030_dma_read, rc4030_dma_write, dmas[0],
-             qdev_get_gpio_in(rc4030, 5), &esp_reset, &dma_enable);
+    esp = esp_init(0x80002000, 0, rc4030_dma_read, rc4030_dma_write, dmas[0],
+                   qdev_get_gpio_in(rc4030, 5), &esp_reset, &dma_enable);
+    scsi_bus_legacy_handle_cmdline(&esp->bus);
 
     /* Floppy */
-    if (drive_get_max_bus(IF_FLOPPY) >= MAX_FD) {
-        fprintf(stderr, "qemu: too many floppy drives\n");
-        exit(1);
-    }
     for (n = 0; n < MAX_FD; n++) {
         fds[n] = drive_get(IF_FLOPPY, 0, n);
     }
-    fdctrl_init_sysbus(qdev_get_gpio_in(rc4030, 1), 0, 0x80003000, fds);
+    /* FIXME: we should enable DMA with a custom IsaDma device */
+    fdctrl_init_sysbus(qdev_get_gpio_in(rc4030, 1), -1, 0x80003000, fds);
 
     /* Real time clock */
-    rtc_init(isa_bus, 1980, NULL);
+    mc146818_rtc_init(isa_bus, 1980, NULL);
     memory_region_init_io(rtc, NULL, &rtc_ops, NULL, "rtc", 0x1000);
     memory_region_add_subregion(address_space, 0x80004000, rtc);
 
@@ -360,24 +343,42 @@ void mips_pica61_init(MachineState *machine)
     mips_jazz_init(machine, JAZZ_PICA61);
 }
 
-static QEMUMachine mips_magnum_machine = {
-    .name = "magnum",
-    .desc = "MIPS Magnum",
-    .init = mips_magnum_init,
-    .block_default_type = IF_SCSI,
+static void mips_magnum_class_init(ObjectClass *oc, void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    mc->desc = "MIPS Magnum";
+    mc->init = mips_magnum_init;
+    mc->block_default_type = IF_SCSI;
+    mc->default_cpu_type = MIPS_CPU_TYPE_NAME("R4000");
+}
+
+static const TypeInfo mips_magnum_type = {
+    .name = MACHINE_TYPE_NAME("magnum"),
+    .parent = TYPE_MACHINE,
+    .class_init = mips_magnum_class_init,
 };
 
-static QEMUMachine mips_pica61_machine = {
-    .name = "pica61",
-    .desc = "Acer Pica 61",
-    .init = mips_pica61_init,
-    .block_default_type = IF_SCSI,
+static void mips_pica61_class_init(ObjectClass *oc, void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    mc->desc = "Acer Pica 61";
+    mc->init = mips_pica61_init;
+    mc->block_default_type = IF_SCSI;
+    mc->default_cpu_type = MIPS_CPU_TYPE_NAME("R4000");
+}
+
+static const TypeInfo mips_pica61_type = {
+    .name = MACHINE_TYPE_NAME("pica61"),
+    .parent = TYPE_MACHINE,
+    .class_init = mips_pica61_class_init,
 };
 
 static void mips_jazz_machine_init(void)
 {
-    qemu_register_machine(&mips_magnum_machine);
-    qemu_register_machine(&mips_pica61_machine);
+    type_register_static(&mips_magnum_type);
+    type_register_static(&mips_pica61_type);
 }
 
-machine_init(mips_jazz_machine_init);
+type_init(mips_jazz_machine_init)

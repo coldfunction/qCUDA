@@ -23,19 +23,11 @@
  * THE SOFTWARE.
  */
 
+#include "qemu/osdep.h"
 #include "hw/pci/pci_host.h"
 #include "hw/ppc/mac.h"
 #include "hw/pci/pci.h"
-
-/* debug Grackle */
-//#define DEBUG_GRACKLE
-
-#ifdef DEBUG_GRACKLE
-#define GRACKLE_DPRINTF(fmt, ...)                               \
-    do { printf("GRACKLE: " fmt , ## __VA_ARGS__); } while (0)
-#else
-#define GRACKLE_DPRINTF(fmt, ...)
-#endif
+#include "trace.h"
 
 #define GRACKLE_PCI_HOST_BRIDGE(obj) \
     OBJECT_CHECK(GrackleState, (obj), TYPE_GRACKLE_PCI_HOST_BRIDGE)
@@ -57,7 +49,7 @@ static void pci_grackle_set_irq(void *opaque, int irq_num, int level)
 {
     qemu_irq *pic = opaque;
 
-    GRACKLE_DPRINTF("set_irq num %d level %d\n", irq_num, level);
+    trace_grackle_set_irq(irq_num, level);
     qemu_set_irq(pic[irq_num + 0x15], level);
 }
 
@@ -71,7 +63,6 @@ PCIBus *pci_grackle_init(uint32_t base, qemu_irq *pic,
     GrackleState *d;
 
     dev = qdev_create(NULL, TYPE_GRACKLE_PCI_HOST_BRIDGE);
-    qdev_init_nofail(dev);
     s = SYS_BUS_DEVICE(dev);
     phb = PCI_HOST_BRIDGE(dev);
     d = GRACKLE_PCI_HOST_BRIDGE(dev);
@@ -82,15 +73,16 @@ PCIBus *pci_grackle_init(uint32_t base, qemu_irq *pic,
     memory_region_add_subregion(address_space_mem, 0x80000000ULL,
                                 &d->pci_hole);
 
-    phb->bus = pci_register_bus(dev, NULL,
-                                pci_grackle_set_irq,
-                                pci_grackle_map_irq,
-                                pic,
-                                &d->pci_mmio,
-                                address_space_io,
-                                0, 4, TYPE_PCI_BUS);
+    phb->bus = pci_register_root_bus(dev, NULL,
+                                     pci_grackle_set_irq,
+                                     pci_grackle_map_irq,
+                                     pic,
+                                     &d->pci_mmio,
+                                     address_space_io,
+                                     0, 4, TYPE_PCI_BUS);
 
     pci_create_simple(phb->bus, 0, "grackle");
+    qdev_init_nofail(dev);
 
     sysbus_mmio_map(s, 0, base);
     sysbus_mmio_map(s, 1, base + 0x00200000);
@@ -133,7 +125,7 @@ static void grackle_pci_class_init(ObjectClass *klass, void *data)
      * PCI-facing part of the host bridge, not usable without the
      * host-facing part, which can't be device_add'ed, yet.
      */
-    dc->cannot_instantiate_with_device_add_yet = true;
+    dc->user_creatable = false;
 }
 
 static const TypeInfo grackle_pci_info = {
@@ -141,13 +133,19 @@ static const TypeInfo grackle_pci_info = {
     .parent        = TYPE_PCI_DEVICE,
     .instance_size = sizeof(PCIDevice),
     .class_init = grackle_pci_class_init,
+    .interfaces = (InterfaceInfo[]) {
+        { INTERFACE_CONVENTIONAL_PCI_DEVICE },
+        { },
+    },
 };
 
 static void pci_grackle_class_init(ObjectClass *klass, void *data)
 {
     SysBusDeviceClass *k = SYS_BUS_DEVICE_CLASS(klass);
+    DeviceClass *dc = DEVICE_CLASS(klass);
 
     k->init = pci_grackle_init_device;
+    set_bit(DEVICE_CATEGORY_BRIDGE, dc->categories);
 }
 
 static const TypeInfo grackle_pci_host_info = {

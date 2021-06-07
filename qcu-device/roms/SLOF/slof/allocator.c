@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <helpers.h>
+#include <allocator.h>
 
 #undef DEBUG
 //#define DEBUG
@@ -45,17 +46,17 @@ struct bitmap {
 #define BM_WORD_MODULO(n)  (n % BM_WORD_BITS)
 #define BM_NUM_BITS(reqsize, bsize)     ((reqsize / bsize) + (reqsize % bsize? 1 : 0))
 
-void bm_clear_bit(unsigned long *bmw, int n)
+static void bm_clear_bit(unsigned long *bmw, int n)
 {
 	BM_WORD(bmw, n) &= ~BIT(BM_WORD_MODULO(n));
 }
 
-void bm_set_bit(unsigned long *bmw, int n)
+static void bm_set_bit(unsigned long *bmw, int n)
 {
 	BM_WORD(bmw, n) |= BIT(BM_WORD_MODULO(n));
 }
 
-bool bm_test_bit(unsigned long *bmw, int n)
+static bool bm_test_bit(unsigned long *bmw, int n)
 {
 #ifdef DEBUG
 	//printf("BMW %x, bitpos %d, value %d\n", &BM_WORD(bmw, n), n, !!(BM_WORD(bmw, n) & BIT(BM_WORD_MODULO(n))));
@@ -64,7 +65,7 @@ bool bm_test_bit(unsigned long *bmw, int n)
 }
 
 /* Improvement: can use FFS routines to get faster results */
-int bm_find_bits(struct bitmap *bm, unsigned int n_bits)
+static int bm_find_bits(struct bitmap *bm, unsigned int n_bits)
 {
 	unsigned int i, j, total_bits;
 	int found = -1;

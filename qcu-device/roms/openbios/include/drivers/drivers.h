@@ -1,7 +1,7 @@
 /*
  *   OpenBIOS driver prototypes
  *
- *   (C) 2004 Stefan Reinauer <stepan@openbios.org>
+ *   (C) 2004 Stefan Reinauer
  *
  *   This program is free software; you can redistribute it and/or
  *   modify it under the terms of the GNU General Public License
@@ -52,6 +52,7 @@ void kbd_init(uint64_t base);
 /* drivers/ide.c */
 int ob_ide_init(const char *path, uint32_t io_port0, uint32_t ctl_port0,
                 uint32_t io_port1, uint32_t ctl_port1);
+void ob_ide_quiesce(void);
 int macio_ide_init(const char *path, uint32_t addr, int nb_channels);
 #endif
 #ifdef CONFIG_DRIVER_ESP
@@ -98,8 +99,8 @@ int ob_floppy_init(const char *path, const char *dev_name,
                    unsigned long io_base, unsigned long mmio_base);
 #endif
 #ifdef CONFIG_DRIVER_PC_KBD
-void ob_pc_kbd_init(const char *path, const char *dev_name, uint64_t base,
-                    uint64_t offset, int intr);
+void ob_pc_kbd_init(const char *path, const char *kdev_name, const char *mdev_name,
+                    uint64_t base, uint64_t offset, int kintr, int mintr);
 int pc_kbd_dataready(void);
 unsigned char pc_kbd_readdata(void);
 #endif

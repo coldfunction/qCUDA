@@ -73,32 +73,12 @@
       nip
    THEN
    F NOT AND                            \ Clear indicator bits
-   \ TODO: Use translate-address here!
+   translate-my-address
 ;
 
 : map-out ( virt size -- )
    \ ." map-out called: " .s cr
    2drop 
-;
-
-: dma-alloc ( ... size -- virt )
-   \ ." dma-alloc called: " .s cr
-   alloc-mem
-;
-
-: dma-free ( virt size -- )
-   \ ." dma-free called: " .s cr
-   free-mem
-;
-
-: dma-map-in ( ... virt size cacheable? -- devaddr )
-   \ ." dma-map-in called: " .s cr
-   2drop
-;
-
-: dma-map-out ( virt devaddr size -- )
-   \ ." dma-map-out called: " .s cr
-   2drop drop
 ;
 
 : dma-sync ( virt devaddr size -- )

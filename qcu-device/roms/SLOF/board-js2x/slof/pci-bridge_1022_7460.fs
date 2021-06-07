@@ -81,7 +81,7 @@ INCLUDE freq.fs
 0 8a0 config-l!
 
 \ 8111 has only 16 bits of PCI I/O space.  Get the address in range.
-8000 next-pci-io !
+8000 pci-next-io !
 
 \ before disabling EHCI it needs to be reset
 

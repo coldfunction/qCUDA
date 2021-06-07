@@ -5,67 +5,15 @@
 //
 // This file may be distributed under the terms of the GNU LGPLv3 license.
 
-#include "ahci.h" // atapi_cmd_data
-#include "ata.h" // atapi_cmd_data
-#include "biosvar.h" // GET_GLOBALFLAT
 #include "block.h" // struct disk_op_s
 #include "blockcmd.h" // struct cdb_request_sense
 #include "byteorder.h" // be32_to_cpu
-#include "esp-scsi.h" // esp_scsi_cmd_data
-#include "lsi-scsi.h" // lsi_scsi_cmd_data
-#include "megasas.h" // megasas_cmd_data
-#include "pvscsi.h" // pvscsi_cmd_data
+#include "farptr.h" // GET_FLATPTR
 #include "output.h" // dprintf
 #include "std/disk.h" // DISK_RET_EPARAM
 #include "string.h" // memset
-#include "usb-msc.h" // usb_cmd_data
-#include "usb-uas.h" // usb_cmd_data
 #include "util.h" // timer_calc
-#include "virtio-scsi.h" // virtio_scsi_cmd_data
-
-// Route command to low-level handler.
-static int
-cdb_cmd_data(struct disk_op_s *op, void *cdbcmd, u16 blocksize)
-{
-    u8 type = GET_GLOBALFLAT(op->drive_gf->type);
-    switch (type) {
-    case DTYPE_ATA_ATAPI:
-        return atapi_cmd_data(op, cdbcmd, blocksize);
-    case DTYPE_USB:
-        return usb_cmd_data(op, cdbcmd, blocksize);
-    case DTYPE_UAS:
-        return uas_cmd_data(op, cdbcmd, blocksize);
-    case DTYPE_VIRTIO_SCSI:
-        return virtio_scsi_cmd_data(op, cdbcmd, blocksize);
-    case DTYPE_LSI_SCSI:
-        return lsi_scsi_cmd_data(op, cdbcmd, blocksize);
-    case DTYPE_ESP_SCSI:
-        return esp_scsi_cmd_data(op, cdbcmd, blocksize);
-    case DTYPE_MEGASAS:
-        return megasas_cmd_data(op, cdbcmd, blocksize);
-    case DTYPE_USB_32:
-        if (!MODESEGMENT)
-            return usb_cmd_data(op, cdbcmd, blocksize);
-    case DTYPE_UAS_32:
-        if (!MODESEGMENT)
-            return uas_cmd_data(op, cdbcmd, blocksize);
-    case DTYPE_PVSCSI:
-        if (!MODESEGMENT)
-            return pvscsi_cmd_data(op, cdbcmd, blocksize);
-    case DTYPE_AHCI_ATAPI:
-        if (!MODESEGMENT)
-            return ahci_cmd_data(op, cdbcmd, blocksize);
-    default:
-        return DISK_RET_EPARAM;
-    }
-}
-
-// Determine if the command is a request to pull data from the device
-int
-cdb_is_read(u8 *cdbcmd, u16 blocksize)
-{
-    return blocksize && cdbcmd[0] != CDB_CMD_WRITE_10;
-}
+#include "malloc.h"
 
 
 /****************************************************************
@@ -79,9 +27,12 @@ cdb_get_inquiry(struct disk_op_s *op, struct cdbres_inquiry *data)
     memset(&cmd, 0, sizeof(cmd));
     cmd.command = CDB_CMD_INQUIRY;
     cmd.length = sizeof(*data);
+    op->command = CMD_SCSI;
     op->count = 1;
     op->buf_fl = data;
-    return cdb_cmd_data(op, &cmd, sizeof(*data));
+    op->cdbcmd = &cmd;
+    op->blocksize = sizeof(*data);
+    return process_op(op);
 }
 
 // Request SENSE
@@ -92,9 +43,12 @@ cdb_get_sense(struct disk_op_s *op, struct cdbres_request_sense *data)
     memset(&cmd, 0, sizeof(cmd));
     cmd.command = CDB_CMD_REQUEST_SENSE;
     cmd.length = sizeof(*data);
+    op->command = CMD_SCSI;
     op->count = 1;
     op->buf_fl = data;
-    return cdb_cmd_data(op, &cmd, sizeof(*data));
+    op->cdbcmd = &cmd;
+    op->blocksize = sizeof(*data);
+    return process_op(op);
 }
 
 // Test unit ready
@@ -104,9 +58,12 @@ cdb_test_unit_ready(struct disk_op_s *op)
     struct cdb_request_sense cmd;
     memset(&cmd, 0, sizeof(cmd));
     cmd.command = CDB_CMD_TEST_UNIT_READY;
+    op->command = CMD_SCSI;
     op->count = 0;
     op->buf_fl = NULL;
-    return cdb_cmd_data(op, &cmd, 0);
+    op->cdbcmd = &cmd;
+    op->blocksize = 0;
+    return process_op(op);
 }
 
 // Request capacity
@@ -116,9 +73,12 @@ cdb_read_capacity(struct disk_op_s *op, struct cdbres_read_capacity *data)
     struct cdb_read_capacity cmd;
     memset(&cmd, 0, sizeof(cmd));
     cmd.command = CDB_CMD_READ_CAPACITY;
+    op->command = CMD_SCSI;
     op->count = 1;
     op->buf_fl = data;
-    return cdb_cmd_data(op, &cmd, sizeof(*data));
+    op->cdbcmd = &cmd;
+    op->blocksize = sizeof(*data);
+    return process_op(op);
 }
 
 // Mode sense, geometry page.
@@ -131,33 +91,12 @@ cdb_mode_sense_geom(struct disk_op_s *op, struct cdbres_mode_sense_geom *data)
     cmd.flags = 8; /* DBD */
     cmd.page = MODE_PAGE_HD_GEOMETRY;
     cmd.count = cpu_to_be16(sizeof(*data));
+    op->command = CMD_SCSI;
     op->count = 1;
     op->buf_fl = data;
-    return cdb_cmd_data(op, &cmd, sizeof(*data));
-}
-
-// Read sectors.
-static int
-cdb_read(struct disk_op_s *op)
-{
-    struct cdb_rwdata_10 cmd;
-    memset(&cmd, 0, sizeof(cmd));
-    cmd.command = CDB_CMD_READ_10;
-    cmd.lba = cpu_to_be32(op->lba);
-    cmd.count = cpu_to_be16(op->count);
-    return cdb_cmd_data(op, &cmd, GET_GLOBALFLAT(op->drive_gf->blksize));
-}
-
-// Write sectors.
-static int
-cdb_write(struct disk_op_s *op)
-{
-    struct cdb_rwdata_10 cmd;
-    memset(&cmd, 0, sizeof(cmd));
-    cmd.command = CDB_CMD_WRITE_10;
-    cmd.lba = cpu_to_be32(op->lba);
-    cmd.count = cpu_to_be16(op->count);
-    return cdb_cmd_data(op, &cmd, GET_GLOBALFLAT(op->drive_gf->blksize));
+    op->cdbcmd = &cmd;
+    op->blocksize = sizeof(*data);
+    return process_op(op);
 }
 
 
@@ -165,29 +104,44 @@ cdb_write(struct disk_op_s *op)
  * Main SCSI commands
  ****************************************************************/
 
-int VISIBLE32FLAT
-scsi_process_op(struct disk_op_s *op)
+// Create a scsi command request from a disk_op_s request
+int
+scsi_fill_cmd(struct disk_op_s *op, void *cdbcmd, int maxcdb)
 {
     switch (op->command) {
     case CMD_READ:
-        return cdb_read(op);
-    case CMD_WRITE:
-        return cdb_write(op);
-    case CMD_FORMAT:
-    case CMD_RESET:
-    case CMD_ISREADY:
-    case CMD_VERIFY:
-    case CMD_SEEK:
-        return DISK_RET_SUCCESS;
+    case CMD_WRITE: ;
+        struct cdb_rwdata_10 *cmd = cdbcmd;
+        memset(cmd, 0, maxcdb);
+        cmd->command = (op->command == CMD_READ ? CDB_CMD_READ_10
+                        : CDB_CMD_WRITE_10);
+        cmd->lba = cpu_to_be32(op->lba);
+        cmd->count = cpu_to_be16(op->count);
+        return GET_FLATPTR(op->drive_fl->blksize);
+    case CMD_SCSI:
+        if (MODESEGMENT)
+            return -1;
+        memcpy(cdbcmd, op->cdbcmd, maxcdb);
+        return op->blocksize;
     default:
-        return DISK_RET_EPARAM;
+        return -1;
     }
 }
 
+// Determine if the command is a request to pull data from the device
+int
+scsi_is_read(struct disk_op_s *op)
+{
+    return op->command == CMD_READ || (
+        !MODESEGMENT && op->command == CMD_SCSI && op->blocksize);
+}
+
+// Check if a SCSI device is ready to receive commands
 int
 scsi_is_ready(struct disk_op_s *op)
 {
-    dprintf(6, "scsi_is_ready (drive=%p)\n", op->drive_gf);
+    ASSERT32FLAT();
+    dprintf(6, "scsi_is_ready (drive=%p)\n", op->drive_fl);
 
     /* Retry TEST UNIT READY for 5 seconds unless MEDIUM NOT PRESENT is
      * reported by the device.  If the device reports "IN PROGRESS",
@@ -219,7 +173,7 @@ scsi_is_ready(struct disk_op_s *op)
 
         if (sense.asc == 0x04 && sense.ascq == 0x01 && !in_progress) {
             /* IN PROGRESS OF BECOMING READY */
-            printf("Waiting for device to detect medium... ");
+            dprintf(1, "Waiting for device to detect medium... ");
             /* Allow 30 seconds more */
             end = timer_calc(30000);
             in_progress = 1;
@@ -228,13 +182,109 @@ scsi_is_ready(struct disk_op_s *op)
     return 0;
 }
 
+#define CDB_CMD_REPORT_LUNS  0xA0
+
+struct cdb_report_luns {
+    u8 command;
+    u8 reserved_01[5];
+    u32 length;
+    u8 pad[6];
+} PACKED;
+
+struct scsi_lun {
+    u16 lun[4];
+};
+
+struct cdbres_report_luns {
+    u32 length;
+    u32 reserved;
+    struct scsi_lun luns[];
+};
+
+static u64 scsilun2u64(struct scsi_lun *scsi_lun)
+{
+    int i;
+    u64 ret = 0;
+    for (i = 0; i < ARRAY_SIZE(scsi_lun->lun); i++)
+        ret |= be16_to_cpu(scsi_lun->lun[i]) << (16 * i);
+    return ret;
+}
+
+// Issue REPORT LUNS on a temporary drive and iterate reported luns calling
+// @add_lun for each
+int scsi_rep_luns_scan(struct drive_s *tmp_drive, scsi_add_lun add_lun)
+{
+    int ret = -1;
+    /* start with the smallest possible buffer, otherwise some devices in QEMU
+     * may (incorrectly) error out on returning less data than fits in it */
+    u32 maxluns = 1;
+    u32 nluns, i;
+    struct cdb_report_luns cdb = {
+        .command = CDB_CMD_REPORT_LUNS,
+    };
+    struct disk_op_s op = {
+        .drive_fl = tmp_drive,
+        .command = CMD_SCSI,
+        .count = 1,
+        .cdbcmd = &cdb,
+    };
+    struct cdbres_report_luns *resp;
+
+    ASSERT32FLAT();
+
+    while (1) {
+        op.blocksize = sizeof(struct cdbres_report_luns) +
+            maxluns * sizeof(struct scsi_lun);
+        op.buf_fl = malloc_tmp(op.blocksize);
+        if (!op.buf_fl) {
+            warn_noalloc();
+            return -1;
+        }
+
+        cdb.length = cpu_to_be32(op.blocksize);
+        if (process_op(&op) != DISK_RET_SUCCESS)
+            goto out;
+
+        resp = op.buf_fl;
+        nluns = be32_to_cpu(resp->length) / sizeof(struct scsi_lun);
+        if (nluns <= maxluns)
+            break;
+
+        free(op.buf_fl);
+        maxluns = nluns;
+    }
+
+    for (i = 0, ret = 0; i < nluns; i++) {
+        u64 lun = scsilun2u64(&resp->luns[i]);
+        if (lun >> 32)
+            continue;
+        ret += !add_lun((u32)lun, tmp_drive);
+    }
+out:
+    free(op.buf_fl);
+    return ret;
+}
+
+// Iterate LUNs on the target and call @add_lun for each
+int scsi_sequential_scan(struct drive_s *tmp_drive, u32 maxluns,
+                         scsi_add_lun add_lun)
+{
+    int ret;
+    u32 lun;
+
+    for (lun = 0, ret = 0; lun < maxluns; lun++)
+        ret += !add_lun(lun, tmp_drive);
+    return ret;
+}
+
 // Validate drive, find block size / sector count, and register drive.
 int
 scsi_drive_setup(struct drive_s *drive, const char *s, int prio)
 {
+    ASSERT32FLAT();
     struct disk_op_s dop;
     memset(&dop, 0, sizeof(dop));
-    dop.drive_gf = drive;
+    dop.drive_fl = drive;
     struct cdbres_inquiry data;
     int ret = cdb_get_inquiry(&dop, &data);
     if (ret)
@@ -263,6 +313,9 @@ scsi_drive_setup(struct drive_s *drive, const char *s, int prio)
         return 0;
     }
 
+    if (pdt != SCSI_TYPE_DISK)
+        return -1;
+
     ret = scsi_is_ready(&dop);
     if (ret) {
         dprintf(1, "scsi_is_ready returned %d\n", ret);
@@ -283,7 +336,7 @@ scsi_drive_setup(struct drive_s *drive, const char *s, int prio)
         return -1;
     }
     drive->sectors = (u64)be32_to_cpu(capdata.sectors) + 1;
-    dprintf(1, "%s blksize=%d sectors=%d\n"
+    dprintf(1, "%s blksize=%d sectors=%u\n"
             , s, drive->blksize, (unsigned)drive->sectors);
 
     // We do not recover from USB stalls, so try to be safe and avoid

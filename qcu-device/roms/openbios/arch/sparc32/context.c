@@ -6,6 +6,8 @@
 #include "config.h"
 #include "kernel/kernel.h"
 #include "context.h"
+#include "libopenbios/bindings.h"
+#include "libopenbios/initprogram.h"
 #include "libopenbios/sys_info.h"
 #include "boot.h"
 #include "openbios.h"
@@ -24,7 +26,6 @@ void __exit_context(void); /* assembly routine */
  * to start us up.
  */
 static struct context main_ctx = {
-    .regs[REG_SP] = (uint32_t) &_estack - 96,
     .pc = (uint32_t) start_main,
     .npc = (uint32_t) start_main + 4,
     .return_addr = (uint32_t) __exit_context,
@@ -32,7 +33,10 @@ static struct context main_ctx = {
 
 /* This is used by assembly routine to load/store the context which
  * it is to switch/switched.  */
-struct context *__context = &main_ctx;
+struct context * volatile __context = &main_ctx;
+
+/* Client program context */
+static struct context *client_ctx;
 
 /* Stack for loaded ELF image */
 static uint8_t image_stack[IMAGE_STACK_SIZE];
@@ -50,12 +54,18 @@ static void start_main(void)
      * We have to keep it in physical address since we will relocate. */
     __boot_ctx = virt_to_phys(__context);
 
+    /* Set up client context */
+    client_ctx = init_context(image_stack, sizeof image_stack, 1);
+    __context = client_ctx;
+
     /* Start the real fun */
     openbios();
 
     /* Returning from here should jump to __exit_context */
     __context = boot_ctx;
 }
+
+#define CTX_OFFSET(n) (sizeof(struct context) + n * sizeof(uint32_t))
 
 /* Setup a new context using the given stack.
  */
@@ -65,14 +75,33 @@ init_context(uint8_t *stack, uint32_t stack_size, int num_params)
     struct context *ctx;
 
     ctx = (struct context *)
-	(stack + stack_size - (sizeof(*ctx) + num_params*sizeof(uint32_t)));
-    memset(ctx, 0, sizeof(*ctx));
+	(stack + stack_size - CTX_OFFSET(num_params));
+    /* Use valid window state from startup */
+    memcpy(ctx, &main_ctx, sizeof(struct context));
 
     /* Fill in reasonable default for flat memory model */
     ctx->regs[REG_SP] = virt_to_phys(SP_LOC(ctx));
     ctx->return_addr = virt_to_phys(__exit_context);
 
     return ctx;
+}
+
+/* init-program */
+int
+arch_init_program(void)
+{
+    volatile struct context *ctx = __context;
+    ucell entry;
+
+    ctx->regs[REG_O0] = (unsigned long)romvec;
+    ctx->regs[REG_SP] = (unsigned long)malloc(IMAGE_STACK_SIZE) + IMAGE_STACK_SIZE - CTX_OFFSET(1);
+
+    /* Set entry point */
+    feval("load-state >ls.entry @");
+    entry = POP();
+    ctx->pc = entry;
+
+    return 0;
 }
 
 /* Switch to another context. */
@@ -100,14 +129,10 @@ struct context *switch_to(struct context *ctx)
 }
 
 /* Start ELF Boot image */
-unsigned int start_elf(unsigned long entry_point, unsigned long param)
+unsigned int start_elf(void)
 {
-    struct context *ctx;
+    volatile struct context *ctx = __context;;
 
-    ctx = init_context(image_stack, sizeof image_stack, 1);
-    ctx->pc = entry_point;
-    ctx->param[0] = param;
-
-    ctx = switch_to(ctx);
+    ctx = switch_to((struct context *)ctx);
     return ctx->regs[REG_O0];
 }

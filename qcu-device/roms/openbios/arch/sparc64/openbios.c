@@ -10,6 +10,8 @@
 #include "libopenbios/openbios.h"
 #include "libopenbios/bindings.h"
 #include "libopenbios/console.h"
+#include "context.h"
+#include "libopenbios/initprogram.h"
 #include "drivers/drivers.h"
 #include "dict.h"
 #include "arch/common/nvram.h"
@@ -56,12 +58,18 @@ static const struct hwdef hwdefs[] = {
             .cfg_addr = APB_SPECIAL_BASE + 0x1000000ULL, // PCI bus configuration space
             .cfg_data = APB_MEM_BASE,                    // PCI bus memory space
             .cfg_base = APB_SPECIAL_BASE,
-            .cfg_len = 0x2000000,
+            .cfg_len = 0x1000000,
             .host_pci_base = APB_MEM_BASE,
-            .pci_mem_base = 0x100000, /* avoid VGA at 0xa0000 */
-            .mem_len = 0x10000000,
+            .pci_mem_base = 0x20000000, /* avoid VGA at 0xa0000 */
+            .mem_len = 0xf0000000,
             .io_base = APB_SPECIAL_BASE + 0x2000000ULL, // PCI Bus I/O space
-            .io_len = 0x10000,
+            .io_len = 0x1000000,
+            .host_ranges = {
+                { .type = CONFIGURATION_SPACE, .parentaddr = 0, .childaddr = APB_SPECIAL_BASE + 0x1000000ULL, .len = 0x1000000 },
+                { .type = IO_SPACE, .parentaddr = 0, .childaddr = APB_SPECIAL_BASE + 0x2000000ULL, .len = 0x1000000 },
+                { .type = MEMORY_SPACE_32, .parentaddr = 0, .childaddr = APB_MEM_BASE, .len = 0xf0000000 },
+                { .type = 0, .parentaddr = 0, .childaddr = 0, .len = 0 }
+            },
             .irqs = { 0, 1, 2, 3 },
         },
         .machine_id_low = 0,
@@ -89,17 +97,16 @@ struct cpudef {
   ( addr -- ? )
 */
 
-extern volatile uint64_t client_tba;
-
 static void
 set_trap_table(void)
 {
     unsigned long addr;
+    volatile struct context *ctx = __context;
 
     addr = POP();
 
-    /* Update client_tba to be updated on CIF exit */
-    client_tba = addr;
+    /* Update %tba to be updated on exit */
+    ctx->tba = (uint64_t)addr;
 }
 
 /* Reset control register is defined in 17.2.7.3 of US IIi User Manual */
@@ -111,6 +118,28 @@ sparc64_reset_all(void)
 
     asm("stxa %0, [%1] 0x15\n\t"
         : : "r" (val), "r" (addr) : "memory");
+}
+
+/* Power off */
+static void
+sparc64_power_off(void)
+{
+    /* Locate address of ebus power device */
+    phandle_t ph;
+    uint32_t addr;
+    volatile uint32_t *p;
+    int len;
+
+    ph = find_dev("/pci/pci@1,1/ebus/power");
+    if (ph) {
+        addr = get_int_property(ph, "address", &len);
+
+        if (len) {
+            /* Set bit 24 to invoke power off */
+            p = cell2pointer(addr);
+            *p = 0x1000000;
+        }
+    }
 }
 
 /* PCI Target Address Space Register (see UltraSPARC IIi User's Manual
@@ -125,6 +154,135 @@ sparc64_set_tas_register(unsigned long val)
 
     asm("stxa %0, [%1] 0x15\n\t"
         : : "r" (val), "r" (addr) : "memory");
+}
+
+/* space?@ and and space?! words */
+static uint8_t
+sparc64_asi_loadb(uint8_t asi, unsigned long address)
+{
+    uint8_t asi_save;
+    uint8_t ret = 0;
+    
+    __asm__ __volatile__("rd %%asi, %0" : "=r" (asi_save));
+    __asm__ __volatile__("wr %0, 0, %%asi" : : "r" (asi));
+    
+    __asm__ __volatile__("ldub [%1], %0"
+        : "=r" (ret)
+        : "r" (address));
+    
+    __asm__ __volatile__("wr %0, 0, %%asi" : : "r" (asi_save));
+    
+    return ret;
+}
+
+/* spacec@ */
+static void
+spacec_read(void)
+{
+    uint8_t ret;
+    
+    uint8_t asi = POP();
+    ucell address = POP();
+    
+    ret = sparc64_asi_loadb(asi, address);
+    
+    PUSH(ret);
+}
+
+static uint16_t
+sparc64_asi_loadw(uint8_t asi, unsigned long address)
+{
+    uint8_t asi_save;
+    uint16_t ret;
+    
+    __asm__ __volatile__("rd %%asi, %0" : "=r" (asi_save));
+    __asm__ __volatile__("wr %0, 0, %%asi" : : "r" (asi));
+    
+    __asm__ __volatile__("lduw [%1], %0"
+        : "=r" (ret)
+        : "r" (address));
+    
+    __asm__ __volatile__("wr %0, 0, %%asi" : : "r" (asi_save));
+    
+    return ret;
+}
+
+/* spacew@ */
+static void
+spacew_read(void)
+{
+    uint16_t ret;
+    
+    uint8_t asi = POP();
+    ucell address = POP();
+    
+    ret = sparc64_asi_loadw(asi, address);
+    
+    PUSH(ret);
+}
+
+static uint32_t
+sparc64_asi_loadl(uint8_t asi, unsigned long address)
+{
+    uint8_t asi_save;
+    uint32_t ret;
+    
+    __asm__ __volatile__("rd %%asi, %0" : "=r" (asi_save));
+    __asm__ __volatile__("wr %0, 0, %%asi" : : "r" (asi));
+
+    __asm__ __volatile__("ld [%1], %0"
+        : "=r" (ret)
+        : "r" (address));
+    
+    __asm__ __volatile__("wr %0, 0, %%asi" : : "r" (asi_save));
+    
+    return ret;
+}
+
+/* spacel@ */
+static void
+spacel_read(void)
+{
+    uint32_t ret;
+    
+    uint8_t asi = POP();
+    ucell address = POP();
+    
+    ret = sparc64_asi_loadl(asi, address);
+    
+    PUSH(ret);
+}
+
+static uint64_t
+sparc64_asi_loadx(uint8_t asi, unsigned long address)
+{
+    uint8_t asi_save;
+    uint64_t ret = 0;
+    
+    __asm__ __volatile__("rd %%asi, %0" : "=r" (asi_save));
+    __asm__ __volatile__("wr %0, 0, %%asi" : : "r" (asi));
+    
+    __asm__ __volatile__("ldx [%1], %0"
+        : "=r" (ret)
+        : "r" (address));
+    
+    __asm__ __volatile__("wr %0, 0, %%asi" : : "r" (asi_save));
+    
+    return ret;
+}
+
+/* spacex@ */
+static void
+spacex_read(void)
+{
+    uint64_t ret;
+    
+    uint8_t asi = POP();
+    ucell address = POP();
+    
+    ret = sparc64_asi_loadx(asi, address);
+    
+    PUSH(ret);
 }
 
 static void cpu_generic_init(const struct cpudef *cpu, uint32_t clock_frequency)
@@ -585,8 +743,18 @@ arch_init( void )
         fword("obp-ticks");
         obp_ticks_pointer = cell2pointer(POP());
 
+        /* Bind to space?@ functions */
+        bind_func("spacec@", spacec_read);
+        bind_func("spacew@", spacew_read);
+        bind_func("spacel@", spacel_read);
+        bind_func("spacex@", spacex_read);
+
+        /* Bind power functions */
+        bind_func("sparc64-power-off", sparc64_power_off);
+        push_str("' sparc64-power-off to power-off");
+        fword("eval");
+
 	bind_func("platform-boot", boot );
-	bind_func("(go)", go);
 }
 
 unsigned long isa_io_base;

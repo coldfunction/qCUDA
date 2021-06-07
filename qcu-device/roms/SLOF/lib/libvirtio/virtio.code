@@ -15,8 +15,14 @@
 #include <virtio-9p.h>
 #include <virtio-scsi.h>
 #include <virtio-net.h>
+#include <virtio-serial.h>
 
 /******** core virtio ********/
+
+// : virtio-setup-vd  ( -- dev )
+PRIM(virtio_X2d_setup_X2d_vd)
+	PUSH; TOS.a = virtio_setup_vd();
+MIRP
 
 // : virtio-vring-size  ( queuesize -- ringsize )
 PRIM(virtio_X2d_vring_X2d_size)
@@ -58,13 +64,22 @@ PRIM(virtio_X2d_blk_X2d_shutdown)
 	virtioblk_shutdown(dev);
 MIRP
 
-// : virtio-blk-read ( dev blkno cnt reg -- #read )
+// : virtio-blk-read ( buf blkno cnt dev -- #read )
 PRIM(virtio_X2d_blk_X2d_read)
 	void *dev = TOS.a; POP;
 	long cnt = TOS.n; POP;
 	long blkno = TOS.n; POP;
 	void *buf = TOS.a;
-	TOS.n = virtioblk_read(dev, buf, blkno, cnt);
+	TOS.n = virtioblk_transfer(dev, buf, blkno, cnt, VIRTIO_BLK_T_IN);
+MIRP
+
+// : virtio-blk-write ( buf blkno cnt dev -- #written )
+PRIM(virtio_X2d_blk_X2d_write)
+	void *dev = TOS.a; POP;
+	long cnt = TOS.n; POP;
+	long blkno = TOS.n; POP;
+	void *buf = TOS.a;
+	TOS.n = virtioblk_transfer(dev, buf, blkno, cnt, VIRTIO_BLK_T_OUT);
 MIRP
 
 /******** virtio-fs ********/
@@ -122,43 +137,75 @@ MIRP
 
 /******** virtio-net ********/
 
-// : virtio-net-open ( mac-addr-str len dev -- false | [ driver true ] )
+// : virtio-net-open ( dev -- false | [ vnet true ] )
 PRIM(virtio_X2d_net_X2d_open)
 {
-	void *dev = TOS.a; POP;
-	int len = TOS.u; POP;
-        char *mac_addr = TOS.a;
+	void *dev = TOS.a;
 
-        net_driver_t *net_driver = virtionet_open(mac_addr, len, dev);
+	void *vnet = virtionet_open(dev);
 
-        if (net_driver) {
-                TOS.u = (unsigned long)net_driver; PUSH;
-                TOS.n = -1;
-        } else
-                TOS.n = 0;
+	if (vnet) {
+		TOS.u = (unsigned long)vnet; PUSH;
+		TOS.n = -1;
+	} else
+		TOS.n = 0;
 }
 MIRP
 
-// : virtio-net-close ( driver -- )
+// : virtio-net-close ( vnet -- )
 PRIM(virtio_X2d_net_X2d_close)
 {
-	net_driver_t *driver = TOS.a; POP;
-	virtionet_close(driver);
+	void *vnet = TOS.a; POP;
+	virtionet_close(vnet);
 }
 MIRP
 
-// : virtio-net-read ( addr len -- actual )
+// : virtio-net-read ( addr len vnet -- actual )
 PRIM(virtio_X2d_net_X2d_read)
 {
+	void *vnet = TOS.a; POP;
 	int len = TOS.u; POP;
-	TOS.n = virtionet_read(TOS.a, len);
+	TOS.n = virtionet_read(vnet, TOS.a, len);
 }
 MIRP
 
-// : virtio-net-write ( addr len -- actual )
+// : virtio-net-write ( addr len vnet -- actual )
 PRIM(virtio_X2d_net_X2d_write)
 {
+	void *vnet = TOS.a; POP;
 	int len = TOS.u; POP;
-	TOS.n = virtionet_write(TOS.a, len);
+	TOS.n = virtionet_write(vnet, TOS.a, len);
 }
+MIRP
+
+/*********** virtio-serial ***********/
+// : virtio-serial-init ( dev -- false | true)
+PRIM(virtio_X2d_serial_X2d_init)
+	void *dev = TOS.a;
+	TOS.u = virtio_serial_init(dev);
+MIRP
+
+// : virtio-serial-shutdown ( dev -- )
+PRIM(virtio_X2d_serial_X2d_shutdown)
+	void *dev = TOS.a; POP;
+	virtio_serial_shutdown(dev);
+MIRP
+
+// : virtio-serial-putchar ( dev char -- )
+PRIM(virtio_X2d_serial_X2d_putchar)
+	unsigned long c = TOS.n; POP;
+	void *dev = TOS.a; POP;
+	virtio_serial_putchar(dev, c);
+MIRP
+
+// : virtio-serial-getchar ( dev -- char)
+PRIM(virtio_X2d_serial_X2d_getchar)
+	void *dev = TOS.a;
+	TOS.n = virtio_serial_getchar(dev);
+MIRP
+
+// : virtio-serial-haschar ( dev -- true | false)
+PRIM(virtio_X2d_serial_X2d_haschar)
+	void *dev = TOS.a;
+	TOS.n = virtio_serial_haschar(dev);
 MIRP

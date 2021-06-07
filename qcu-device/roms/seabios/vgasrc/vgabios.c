@@ -7,14 +7,16 @@
 
 #include "biosvar.h" // GET_BDA
 #include "bregs.h" // struct bregs
-#include "clext.h" // clext_1012
 #include "config.h" // CONFIG_*
 #include "output.h" // dprintf
 #include "std/vbe.h" // VBE_RETURN_STATUS_FAILED
+#include "std/vga.h" // struct video_func_static
 #include "stdvga.h" // stdvga_set_cursor_shape
 #include "string.h" // memset_far
 #include "vgabios.h" // calc_page_size
+#include "vgafb.h" // vgafb_write_char
 #include "vgahw.h" // vgahw_set_mode
+#include "vgautil.h" // swcursor_pre_handle10
 
 
 /****************************************************************
@@ -74,7 +76,6 @@ get_cursor_shape(void)
 static void
 set_cursor_shape(u16 cursor_type)
 {
-    vgafb_set_swcursor(0);
     SET_BDA(cursor_type, cursor_type);
     if (CONFIG_VGA_STDVGA_PORTS)
         stdvga_set_cursor_shape(get_cursor_shape());
@@ -83,42 +84,27 @@ set_cursor_shape(u16 cursor_type)
 static void
 set_cursor_pos(struct cursorpos cp)
 {
-    u8 page = cp.page, x = cp.x, y = cp.y;
-
-    // Should not happen...
-    if (page > 7)
+    if (cp.page > 7)
+        // Should not happen...
         return;
 
-    vgafb_set_swcursor(0);
+    if (cp.page == GET_BDA(video_page)) {
+        // Update cursor in hardware
+        if (CONFIG_VGA_STDVGA_PORTS)
+            stdvga_set_cursor_pos((int)text_address(cp));
+    }
 
-    // Bios cursor pos
-    SET_BDA(cursor_pos[page], (y << 8) | x);
-
-    if (!CONFIG_VGA_STDVGA_PORTS)
-        return;
-
-    // Set the hardware cursor
-    u8 current = GET_BDA(video_page);
-    if (cp.page != current)
-        return;
-
-    // Calculate the memory address
-    stdvga_set_cursor_pos((int)text_address(cp));
+    // Update BIOS cursor pos
+    SET_BDA(cursor_pos[cp.page], (cp.y << 8) | cp.x);
 }
 
 struct cursorpos
 get_cursor_pos(u8 page)
 {
-    if (page == 0xff)
-        // special case - use current page
-        page = GET_BDA(video_page);
-    if (page > 7) {
-        struct cursorpos cp = { 0, 0, 0xfe };
-        return cp;
-    }
+    if (page > 7)
+        return (struct cursorpos) { 0, 0, 0 };
     u16 xy = GET_BDA(cursor_pos[page]);
-    struct cursorpos cp = {xy, xy>>8, page};
-    return cp;
+    return (struct cursorpos) { xy, xy>>8, page };
 }
 
 static void
@@ -131,8 +117,6 @@ set_active_page(u8 page)
     struct vgamode_s *vmode_g = get_current_mode();
     if (!vmode_g)
         return;
-
-    vgafb_set_swcursor(0);
 
     // Calculate memory address of start of page
     struct cursorpos cp = {0, 0, page};
@@ -212,15 +196,10 @@ write_teletype(struct cursorpos *pcp, struct carattr ca)
     if (pcp->y > nbrows) {
         pcp->y--;
 
-        struct cursorpos dest = {0, 0, pcp->page};
-        struct cursorpos src = {0, 1, pcp->page};
-        struct cursorpos size = {GET_BDA(video_cols), nbrows};
-        vgafb_move_chars(dest, src, size);
-
-        struct cursorpos clr = {0, nbrows, pcp->page};
+        struct cursorpos win = {0, 0, pcp->page};
+        struct cursorpos winsize = {GET_BDA(video_cols), nbrows+1};
         struct carattr attr = {' ', 0, 0};
-        struct cursorpos clrsize = {GET_BDA(video_cols), 1};
-        vgafb_clear_chars(clr, attr, clrsize);
+        vgafb_scroll(win, winsize, 1, attr);
     }
 }
 
@@ -287,8 +266,6 @@ vga_set_mode(int mode, int flags)
     if (!vmode_g)
         return VBE_RETURN_STATUS_FAILED;
 
-    vgafb_set_swcursor(0);
-
     int ret = vgahw_set_mode(vmode_g, flags);
     if (ret)
         return ret;
@@ -304,6 +281,12 @@ vga_set_mode(int mode, int flags)
         SET_BDA(video_mode, 0xff);
     SET_BDA_EXT(vbe_mode, mode | (flags & MF_VBEFLAGS));
     SET_BDA_EXT(vgamode_offset, (u32)vmode_g);
+    if (CONFIG_VGA_ALLOCATE_EXTRA_STACK)
+        // Disable extra stack if it appears a modern OS is in use.
+        // This works around bugs in some versions of Windows (Vista
+        // and possibly later) when the stack is in the e-segment.
+        MASK_BDA_EXT(flags, BF_EXTRA_STACK
+                     , (flags & MF_LEGACY) ? BF_EXTRA_STACK : 0);
     if (memmodel == MM_TEXT) {
         SET_BDA(video_cols, width);
         SET_BDA(video_rows, height-1);
@@ -408,6 +391,7 @@ handle_1005(struct bregs *regs)
 static void
 verify_scroll(struct bregs *regs, int dir)
 {
+    // Verify parameters
     u8 ulx = regs->cl, uly = regs->ch, lrx = regs->dl, lry = regs->dh;
     u16 nbrows = GET_BDA(video_rows) + 1;
     if (lry >= nbrows)
@@ -418,41 +402,16 @@ verify_scroll(struct bregs *regs, int dir)
     int wincols = lrx - ulx + 1, winrows = lry - uly + 1;
     if (wincols <= 0 || winrows <= 0)
         return;
+    int lines = regs->al;
+    if (lines >= winrows)
+        lines = 0;
+    lines *= dir;
 
-    u8 page = GET_BDA(video_page);
-    int clearlines = regs->al, movelines = winrows - clearlines;
-    if (!clearlines || movelines <= 0) {
-        // Clear whole area.
-        struct cursorpos clr = {ulx, uly, page};
-        struct carattr attr = {' ', regs->bh, 1};
-        struct cursorpos clrsize = {wincols, winrows};
-        vgafb_clear_chars(clr, attr, clrsize);
-        return;
-    }
-
-    if (dir > 0) {
-        // Normal scroll
-        struct cursorpos dest = {ulx, uly, page};
-        struct cursorpos src = {ulx, uly + clearlines, page};
-        struct cursorpos size = {wincols, movelines};
-        vgafb_move_chars(dest, src, size);
-
-        struct cursorpos clr = {ulx, uly + movelines, page};
-        struct carattr attr = {' ', regs->bh, 1};
-        struct cursorpos clrsize = {wincols, clearlines};
-        vgafb_clear_chars(clr, attr, clrsize);
-    } else {
-        // Scroll down
-        struct cursorpos dest = {ulx, uly + clearlines, page};
-        struct cursorpos src = {ulx, uly, page};
-        struct cursorpos size = {wincols, movelines};
-        vgafb_move_chars(dest, src, size);
-
-        struct cursorpos clr = {ulx, uly, page};
-        struct carattr attr = {' ', regs->bh, 1};
-        struct cursorpos clrsize = {wincols, clearlines};
-        vgafb_clear_chars(clr, attr, clrsize);
-    }
+    // Scroll (or clear) window
+    struct cursorpos win = {ulx, uly, GET_BDA(video_page)};
+    struct cursorpos winsize = {wincols, winrows};
+    struct carattr attr = {' ', regs->bh, 1};
+    vgafb_scroll(win, winsize, lines, attr);
 }
 
 static void
@@ -549,7 +508,7 @@ handle_100e(struct bregs *regs)
     // Ralf Brown Interrupt list is WRONG on bh(page)
     // We do output only on the current page !
     struct carattr ca = {regs->al, regs->bl, 0};
-    struct cursorpos cp = get_cursor_pos(0xff);
+    struct cursorpos cp = get_cursor_pos(GET_BDA(video_page));
     write_teletype(&cp, ca);
     set_cursor_pos(cp);
 }
@@ -1024,13 +983,7 @@ handle_1012(struct bregs *regs)
 static void noinline
 handle_1013(struct bregs *regs)
 {
-    struct cursorpos cp;
-    if (regs->dh == 0xff)
-        // if row=0xff special case : use current cursor position
-        cp = get_cursor_pos(regs->bh);
-    else
-        cp = (struct cursorpos) {regs->dl, regs->dh, regs->bh};
-
+    struct cursorpos cp = {regs->dl, regs->dh, regs->bh};
     u16 count = regs->cx;
     u8 *offset_far = (void*)(regs->bp + 0);
     u8 attr = regs->bl;
@@ -1146,6 +1099,8 @@ void VISIBLE16
 handle_10(struct bregs *regs)
 {
     debug_enter(regs, DEBUG_VGA_10);
+    swcursor_pre_handle10(regs);
+
     switch (regs->ah) {
     case 0x00: handle_1000(regs); break;
     case 0x01: handle_1001(regs); break;

@@ -30,6 +30,10 @@ static const pci_arch_t default_pci_host = {
     .vendor_id = PCI_VENDOR_ID_INTEL,
     .device_id = PCI_DEVICE_ID_INTEL_82441,
     .io_base = 0x1000,
+    .host_ranges = {
+        { .type = IO_SPACE, .parentaddr = 0, .childaddr = 0x1000, .len = 0 },
+        { .type = 0, .parentaddr = 0, .childaddr = 0, .len = 0 }
+     }
 };
 #endif
 
@@ -73,7 +77,6 @@ arch_init( void )
 #endif
 	device_end();
 	bind_func("platform-boot", boot );
-	bind_func("(go)", go );
 }
 
 extern struct _console_ops arch_console_ops;

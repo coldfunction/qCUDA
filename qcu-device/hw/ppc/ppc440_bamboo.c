@@ -11,8 +11,10 @@
  *
  */
 
-#include "config.h"
+#include "qemu/osdep.h"
+#include "qemu/error-report.h"
 #include "qemu-common.h"
+#include "qemu/error-report.h"
 #include "net/net.h"
 #include "hw/hw.h"
 #include "hw/pci/pci.h"
@@ -27,6 +29,7 @@
 #include "hw/ppc/ppc.h"
 #include "ppc405.h"
 #include "sysemu/sysemu.h"
+#include "sysemu/qtest.h"
 #include "hw/sysbus.h"
 
 #define BINARY_DEVICE_TREE_FILE "bamboo.dtb"
@@ -182,16 +185,21 @@ static void bamboo_init(MachineState *machine)
     int success;
     int i;
 
-    /* Setup CPU. */
-    if (machine->cpu_model == NULL) {
-        machine->cpu_model = "440EP";
-    }
-    cpu = cpu_ppc_init(machine->cpu_model);
-    if (cpu == NULL) {
-        fprintf(stderr, "Unable to initialize CPU!\n");
+    cpu = POWERPC_CPU(cpu_create(machine->cpu_type));
+    env = &cpu->env;
+
+    if (env->mmu_model != POWERPC_MMU_BOOKE) {
+        error_report("MMU model %i not supported by this machine",
+                     env->mmu_model);
         exit(1);
     }
-    env = &cpu->env;
+
+#ifdef TARGET_PPCEMB
+    if (!qtest_enabled()) {
+        warn_report("qemu-system-ppcemb is deprecated, "
+                    "please use qemu-system-ppc instead.");
+    }
+#endif
 
     qemu_register_reset(main_cpu_reset, cpu);
     ppc_booke_timers_init(cpu, 400000000, 0);
@@ -222,7 +230,7 @@ static void bamboo_init(MachineState *machine)
                                 NULL);
     pcibus = (PCIBus *)qdev_get_child_bus(dev, "pci.0");
     if (!pcibus) {
-        fprintf(stderr, "couldn't create PCI controller!\n");
+        error_report("couldn't create PCI controller");
         exit(1);
     }
 
@@ -256,14 +264,14 @@ static void bamboo_init(MachineState *machine)
                               NULL, NULL);
         if (success < 0) {
             success = load_elf(kernel_filename, NULL, NULL, &elf_entry,
-                               &elf_lowaddr, NULL, 1, ELF_MACHINE, 0);
+                               &elf_lowaddr, NULL, 1, PPC_ELF_MACHINE,
+                               0, 0);
             entry = elf_entry;
             loadaddr = elf_lowaddr;
         }
         /* XXX try again as binary */
         if (success < 0) {
-            fprintf(stderr, "qemu: could not load kernel '%s'\n",
-                    kernel_filename);
+            error_report("could not load kernel '%s'", kernel_filename);
             exit(1);
         }
     }
@@ -274,8 +282,8 @@ static void bamboo_init(MachineState *machine)
                                           ram_size - RAMDISK_ADDR);
 
         if (initrd_size < 0) {
-            fprintf(stderr, "qemu: could not load ram disk '%s' at %x\n",
-                    initrd_filename, RAMDISK_ADDR);
+            error_report("could not load ram disk '%s' at %x",
+                         initrd_filename, RAMDISK_ADDR);
             exit(1);
         }
     }
@@ -284,24 +292,17 @@ static void bamboo_init(MachineState *machine)
     if (kernel_filename) {
         if (bamboo_load_device_tree(FDT_ADDR, ram_size, RAMDISK_ADDR,
                                     initrd_size, kernel_cmdline) < 0) {
-            fprintf(stderr, "couldn't load device tree\n");
+            error_report("couldn't load device tree");
             exit(1);
         }
     }
-
-    if (kvm_enabled())
-        kvmppc_init();
 }
 
-static QEMUMachine bamboo_machine = {
-    .name = "bamboo",
-    .desc = "bamboo",
-    .init = bamboo_init,
-};
-
-static void bamboo_machine_init(void)
+static void bamboo_machine_init(MachineClass *mc)
 {
-    qemu_register_machine(&bamboo_machine);
+    mc->desc = "bamboo";
+    mc->init = bamboo_init;
+    mc->default_cpu_type = POWERPC_CPU_TYPE_NAME("440epb");
 }
 
-machine_init(bamboo_machine_init);
+DEFINE_MACHINE("bamboo", bamboo_machine_init)

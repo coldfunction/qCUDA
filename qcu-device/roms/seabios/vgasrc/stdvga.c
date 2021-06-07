@@ -10,6 +10,7 @@
 #include "stdvga.h" // stdvga_setup
 #include "string.h" // memset_far
 #include "vgabios.h" // struct vgamode_s
+#include "vgautil.h" // stdvga_attr_write
 #include "x86.h" // outb
 
 
@@ -320,6 +321,11 @@ stdvga_set_dacformat(struct vgamode_s *vmode_g, int val)
     return -1;
 }
 
+int
+stdvga_get_linesize(struct vgamode_s *vmode_g)
+{
+    return DIV_ROUND_UP(GET_GLOBAL(vmode_g->width) * vga_bpp(vmode_g), 8);
+}
 
 /****************************************************************
  * Save/Restore state

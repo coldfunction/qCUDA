@@ -10,6 +10,8 @@
  *     IBM Corporation - initial implementation
  *****************************************************************************/
 
+cod(virtio-setup-vd)
+
 cod(virtio-vring-size)
 cod(virtio-get-qsize)
 cod(virtio-get-config)
@@ -18,6 +20,7 @@ cod(virtio-set-qaddr)
 cod(virtio-blk-init)
 cod(virtio-blk-shutdown)
 cod(virtio-blk-read)
+cod(virtio-blk-write)
 
 cod(virtio-scsi-init)
 cod(virtio-scsi-shutdown)
@@ -31,3 +34,9 @@ cod(virtio-net-open)
 cod(virtio-net-close)
 cod(virtio-net-read)
 cod(virtio-net-write)
+
+cod(virtio-serial-init)
+cod(virtio-serial-shutdown)
+cod(virtio-serial-putchar)
+cod(virtio-serial-getchar)
+cod(virtio-serial-haschar)

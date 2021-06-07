@@ -97,9 +97,9 @@ __start:
 	bne	a0, 1f
 
 	// Load boot arguments
-	mfpr	a0, qemu_trap_arg0
-	mfpr	a1, qemu_trap_arg1
-	mfpr	a2, qemu_trap_arg2
+	mfpr	a0, qemu_trap_arg0		// memsize
+	mfpr	a1, qemu_trap_arg1		// kernel entry
+	mfpr	a2, qemu_trap_arg2		// ncpus
 
 	// Continue in do_start, outside PALmode.
 	ldah	$27, do_start($gp)		!gprelhigh
@@ -400,10 +400,25 @@ CallPal_Draina:
 	hw_rei
 ENDFN	CallPal_Draina
 
+/*
+ * Delay for N nanoseconds.
+ *
+ * This is unique to QEMU, used only within PALcode itself.
+ */
 	ORG_CALL_PAL_PRIV(0x03)
-CallPal_OpcDec03:
-	br	CallPal_OpcDec
-ENDFN	CallPal_OpcDec03
+CallPal_Ndelay:
+	mfpr	p0, qemu_vmtime
+	addq	p0, a0, p0
+	mtpr	p0, qemu_alarm
+
+	mtpr	$31, qemu_wait
+
+	SYS_ACK_CLK p2, p3, p4
+
+	mfpr	v0, qemu_vmtime
+	subq	p0, v0, v0
+	hw_rei
+ENDFN	CallPal_Ndelay
 
 	ORG_CALL_PAL_PRIV(0x04)
 CallPal_OpcDec04:
@@ -1416,6 +1431,7 @@ ENDFN	CallPal_OpcDec85
  */ 
         ORG_CALL_PAL_UNPRIV(0x86)
 CallPal_Imb:
+	mb
 	hw_rei
 ENDFN	CallPal_Imb
 
@@ -1914,5 +1930,5 @@ Sys_EnterConsole:
 	.align 3
 	.globl	stack
 	.type	stack,@object
-	.size	stack,STACK_SIZE
-stack:	.skip	STACK_SIZE
+	.size	stack,STACK_SIZE * 4
+stack:	.skip	STACK_SIZE * 4

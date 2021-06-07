@@ -10,7 +10,7 @@
 #define VIRTIO_QC(obj)                                        \
         OBJECT_CHECK(VirtIOQC, (obj), TYPE_VIRTIO_QC)
 
-//#define VIRTIO_ID_QCUDA 69
+#define VIRTIO_ID_QCUDA 69
 
 typedef struct VirtIOQCConf VirtIOQCConf;
 typedef struct VirtIOQC VirtIOQC;

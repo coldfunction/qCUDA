@@ -22,10 +22,15 @@
  * THE SOFTWARE.
  */
 
+#include "qemu/osdep.h"
+#include "qapi/error.h"
+#include "qemu-common.h"
+#include "cpu.h"
 #include <sys/ioctl.h>
 #include "exec/address-spaces.h"
 #include "hw/hw.h"
 #include "hw/ppc/openpic.h"
+#include "hw/ppc/openpic_kvm.h"
 #include "hw/pci/msi.h"
 #include "hw/sysbus.h"
 #include "sysemu/kvm.h"
@@ -119,10 +124,6 @@ static void kvm_openpic_region_add(MemoryListener *listener,
     struct kvm_device_attr attr;
     uint64_t reg_base;
     int ret;
-
-    if (section->address_space != &address_space_memory) {
-        abort();
-    }
 
     /* Ignore events on regions that are not us */
     if (section->mr != &opp->mem) {
@@ -238,7 +239,7 @@ static void kvm_openpic_realize(DeviceState *dev, Error **errp)
     memory_listener_register(&opp->mem_listener, &address_space_memory);
 
     /* indicate pic capabilities */
-    msi_supported = true;
+    msi_nonbroken = true;
     kvm_kernel_irqchip = true;
     kvm_async_interrupts_allowed = true;
 
@@ -275,6 +276,7 @@ static void kvm_openpic_class_init(ObjectClass *oc, void *data)
     dc->realize = kvm_openpic_realize;
     dc->props = kvm_openpic_properties;
     dc->reset = kvm_openpic_reset;
+    set_bit(DEVICE_CATEGORY_MISC, dc->categories);
 }
 
 static const TypeInfo kvm_openpic_info = {

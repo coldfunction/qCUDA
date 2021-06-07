@@ -57,6 +57,7 @@ OF_FFS_FILES = \
 	$(SLOFBRDDIR)/attu.fs \
 	$(SLOFBRDDIR)/cpu.fs \
 	$(SLOFBRDDIR)/ioapic.fs \
+	$(SLOFBRDDIR)/dma-function.fs \
 	$(SLOFBRDDIR)/pci-bridge_1022_7460.fs \
 	$(SLOFBRDDIR)/pci-device_1014_028c.fs \
 	$(SLOFBRDDIR)/pci-device_1014_02bd.fs \
@@ -88,6 +89,7 @@ OF_FFS_FILES = \
 	$(SLOFCMNDIR)/fs/pci-config-bridge.fs \
 	$(SLOFCMNDIR)/fs/update_flash.fs \
 	$(SLOFCMNDIR)/fs/xmodem.fs \
+	$(SLOFCMNDIR)/fs/fcode/evaluator.fs \
 	$(SLOFCMNDIR)/fs/devices/pci-device_10de_0141.fs \
 	$(SLOFCMNDIR)/fs/devices/pci-class_02.fs \
 	$(SLOFBRDDIR)/default-font.bin

@@ -6,8 +6,9 @@
  * RSA public-key cryptography
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
+#include <stdarg.h>
 #include <ipxe/crypto.h>
 #include <ipxe/bigint.h>
 #include <ipxe/asn1.h>
@@ -75,6 +76,9 @@ struct rsa_context {
 	/** Temporary working space for modular exponentiation */
 	void *tmp;
 };
+
+/** RSA context size */
+#define RSA_CTX_SIZE sizeof ( struct rsa_context )
 
 extern struct pubkey_algorithm rsa_algorithm;
 

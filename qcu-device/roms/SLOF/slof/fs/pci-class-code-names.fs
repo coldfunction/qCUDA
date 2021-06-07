@@ -84,7 +84,7 @@
         08  OF s" raceway"              ENDOF
         09  OF s" semi-transparent-pci" ENDOF
         0A  OF s" infiniband"           ENDOF
-        dup OF s" unkown-bridge"        ENDOF
+        dup OF s" unknown-bridge"       ENDOF
         ENDCASE
 ;
 

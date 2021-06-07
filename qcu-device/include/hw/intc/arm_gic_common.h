@@ -55,6 +55,8 @@ typedef struct GICState {
 
     qemu_irq parent_irq[GIC_NCPU];
     qemu_irq parent_fiq[GIC_NCPU];
+    qemu_irq parent_virq[GIC_NCPU];
+    qemu_irq parent_vfiq[GIC_NCPU];
     /* GICD_CTLR; for a GIC with the security extensions the NS banked version
      * of this register is just an alias of bit 1 of the S banked version.
      */
@@ -68,7 +70,6 @@ typedef struct GICState {
     uint8_t irq_target[GIC_MAXIRQ];
     uint8_t priority1[GIC_INTERNAL][GIC_NCPU];
     uint8_t priority2[GIC_MAXIRQ - GIC_INTERNAL];
-    uint16_t last_active[GIC_MAXIRQ][GIC_NCPU];
     /* For each SGI on the target CPU, we store 8 bits
      * indicating which source CPUs have made this SGI
      * pending on the target CPU. These correspond to
@@ -78,7 +79,6 @@ typedef struct GICState {
     uint8_t sgi_pending[GIC_NR_SGIS][GIC_NCPU];
 
     uint16_t priority_mask[GIC_NCPU];
-    uint16_t running_irq[GIC_NCPU];
     uint16_t running_priority[GIC_NCPU];
     uint16_t current_pending[GIC_NCPU];
 
@@ -96,16 +96,9 @@ typedef struct GICState {
      * If an interrupt for preemption level X is active, then
      *   APRn[X mod 32] == 0b1,  where n = X / 32
      * otherwise the bit is clear.
-     *
-     * TODO: rewrite the interrupt acknowlege/complete routines to use
-     * the APR registers to track the necessary information to update
-     * s->running_priority[] on interrupt completion (ie completely remove
-     * last_active[][] and running_irq[]). This will be necessary if we ever
-     * want to support TCG<->KVM migration, or TCG guests which can
-     * do power management involving powering down and restarting
-     * the GIC.
      */
     uint32_t apr[GIC_NR_APRS][GIC_NCPU];
+    uint32_t nsapr[GIC_NR_APRS][GIC_NCPU];
 
     uint32_t num_cpu;
 
@@ -118,7 +111,9 @@ typedef struct GICState {
     uint32_t num_irq;
     uint32_t revision;
     bool security_extn;
+    bool irq_reset_nonsecure; /* configure IRQs as group 1 (NS) on reset? */
     int dev_fd; /* kvm device fd if backed by kvm vgic support */
+    Error *migration_blocker;
 } GICState;
 
 #define TYPE_ARM_GIC_COMMON "arm_gic_common"
@@ -137,5 +132,8 @@ typedef struct ARMGICCommonClass {
     void (*pre_save)(GICState *s);
     void (*post_load)(GICState *s);
 } ARMGICCommonClass;
+
+void gic_init_irqs_and_mmio(GICState *s, qemu_irq_handler handler,
+                            const MemoryRegionOps *ops);
 
 #endif

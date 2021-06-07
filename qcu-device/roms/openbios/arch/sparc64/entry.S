@@ -11,6 +11,7 @@
 #include <asm/asi.h>
 #include "pstate.h"
 #include "lsu.h"
+#include "cpustate.h"
 #define NO_QEMU_PROTOS
 #define NO_OPENBIOS_PROTOS
 #include "arch/common/fw_cfg.h"
@@ -147,7 +148,7 @@ entry:
         srlx    %g5, 19, %g6			! %g6 = # of 512k .bss pages
 	set	0xc0000000, %g3
 	sllx	%g3, 32, %g3
-	or	%g3, 0x76, %g3
+	or	%g3, 0x7e, %g3
 	! valid, 512k, locked, cacheable(I/E/C), priv, writable
 	set	48, %g7
 1:	stxa	%g4, [%g7] ASI_DMMU		! vaddr = _data + N * 0x80000, ctx=0
@@ -172,7 +173,7 @@ entry:
 1:      stxa	%g4, [%g7] ASI_DMMU		! vaddr = _rodata, ctx=0
 	set	0xc0000000, %g3
 	sllx	%g3, 32, %g3
-	or	%g3, 0x74, %g3
+	or	%g3, 0x7c, %g3
 	or	%l2, %g3, %g3
 	! valid, 512k, locked, cacheable(I/E/C), priv
 	! paddr = _rodata + N * 0x10000
@@ -196,7 +197,7 @@ entry:
 1:      stxa	%g4, [%g7] ASI_IMMU		! vaddr = _start, ctx=0
 	set	0xc0000000, %g3
 	sllx	%g3, 32, %g3
-	or	%g3, 0x74, %g3
+	or	%g3, 0x7c, %g3
 	or	%l2, %g3, %g3
 	! valid, 512k, locked, cacheable(I/E/C), priv
 	! paddr = _start + N * 0x80000
@@ -264,6 +265,19 @@ lowmem:
         /* Finally, turn on traps so that we can call c-code. */
 	wrpr    %g0, (PSTATE_PRIV|PSTATE_PEF|PSTATE_IE), %pstate
 
+        /* Set up a default context */
+        setx    __context, %g2, %g1
+        ldx     [%g1], %g1
+        
+        SAVE_CPU_STATE(entry)
+        
+        /* Set up local stack pointer */
+        setx    _estack - 2047, %o2, %sp
+        
+        /* And for the main context */
+        add	%sp, - 192 - 0x500, %g2 
+        stx	%g2, [%g1 + 0xa0]
+
         ! 100 Hz timer
         setx    TICK_INT_DIS, %g2, %g1
         rd      %tick, %g2
@@ -276,7 +290,7 @@ lowmem:
          * Main context is statically defined in C.
          */
 
-        call    __switch_context_nosave
+        call    __switch_context
          nop
 
         /* We get here when the main context switches back to

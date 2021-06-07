@@ -26,8 +26,9 @@
 /* #define VERBOSE_ES1370 */
 #define SILENT_ES1370
 
+#include "qemu/osdep.h"
 #include "hw/hw.h"
-#include "hw/audio/audio.h"
+#include "hw/audio/soundhw.h"
 #include "audio/audio.h"
 #include "hw/pci/pci.h"
 #include "sysemu/dma.h"
@@ -156,11 +157,6 @@ static const unsigned dac1_samplerate[] = { 5512, 11025, 22050, 44100 };
 #define DAC1_CHANNEL 0
 #define DAC2_CHANNEL 1
 #define ADC_CHANNEL 2
-
-#define IO_READ_PROTO(n) \
-static uint32_t n (void *opaque, uint32_t addr)
-#define IO_WRITE_PROTO(n) \
-static void n (void *opaque, uint32_t addr, uint32_t val)
 
 static void es1370_dac1_callback (void *opaque, int free);
 static void es1370_dac2_callback (void *opaque, int free);
@@ -292,6 +288,10 @@ struct chan_bits {
     void (*calc_freq) (ES1370State *s, uint32_t ctl,
                        uint32_t *old_freq, uint32_t *new_freq);
 };
+
+#define TYPE_ES1370 "ES1370"
+#define ES1370(obj) \
+    OBJECT_CHECK(ES1370State, (obj), TYPE_ES1370)
 
 static void es1370_dac1_calc_freq (ES1370State *s, uint32_t ctl,
                                    uint32_t *old_freq, uint32_t *new_freq);
@@ -474,7 +474,7 @@ static inline uint32_t es1370_fixup (ES1370State *s, uint32_t addr)
     return addr;
 }
 
-IO_WRITE_PROTO (es1370_writeb)
+static void es1370_writeb(void *opaque, uint32_t addr, uint32_t val)
 {
     ES1370State *s = opaque;
     uint32_t shift, mask;
@@ -512,7 +512,7 @@ IO_WRITE_PROTO (es1370_writeb)
     }
 }
 
-IO_WRITE_PROTO (es1370_writew)
+static void es1370_writew(void *opaque, uint32_t addr, uint32_t val)
 {
     ES1370State *s = opaque;
     addr = es1370_fixup (s, addr);
@@ -549,7 +549,7 @@ IO_WRITE_PROTO (es1370_writew)
     }
 }
 
-IO_WRITE_PROTO (es1370_writel)
+static void es1370_writel(void *opaque, uint32_t addr, uint32_t val)
 {
     ES1370State *s = opaque;
     struct chan *d = &s->chan[0];
@@ -615,7 +615,7 @@ IO_WRITE_PROTO (es1370_writel)
     }
 }
 
-IO_READ_PROTO (es1370_readb)
+static uint32_t es1370_readb(void *opaque, uint32_t addr)
 {
     ES1370State *s = opaque;
     uint32_t val;
@@ -650,7 +650,7 @@ IO_READ_PROTO (es1370_readb)
     return val;
 }
 
-IO_READ_PROTO (es1370_readw)
+static uint32_t es1370_readw(void *opaque, uint32_t addr)
 {
     ES1370State *s = opaque;
     struct chan *d = &s->chan[0];
@@ -692,7 +692,7 @@ IO_READ_PROTO (es1370_readw)
     return val;
 }
 
-IO_READ_PROTO (es1370_readl)
+static uint32_t es1370_readl(void *opaque, uint32_t addr)
 {
     ES1370State *s = opaque;
     uint32_t val;
@@ -1010,15 +1010,15 @@ static const VMStateDescription vmstate_es1370 = {
     }
 };
 
-static void es1370_on_reset (void *opaque)
+static void es1370_on_reset(DeviceState *dev)
 {
-    ES1370State *s = opaque;
+    ES1370State *s = container_of(dev, ES1370State, dev.qdev);
     es1370_reset (s);
 }
 
 static void es1370_realize(PCIDevice *dev, Error **errp)
 {
-    ES1370State *s = DO_UPCAST (ES1370State, dev, dev);
+    ES1370State *s = ES1370(dev);
     uint8_t *c = s->dev.config;
 
     c[PCI_STATUS + 1] = PCI_STATUS_DEVSEL_SLOW >> 8;
@@ -1035,15 +1035,27 @@ static void es1370_realize(PCIDevice *dev, Error **errp)
 
     memory_region_init_io (&s->io, OBJECT(s), &es1370_io_ops, s, "es1370", 256);
     pci_register_bar (&s->dev, 0, PCI_BASE_ADDRESS_SPACE_IO, &s->io);
-    qemu_register_reset (es1370_on_reset, s);
 
     AUD_register_card ("es1370", &s->card);
     es1370_reset (s);
 }
 
+static void es1370_exit(PCIDevice *dev)
+{
+    ES1370State *s = ES1370(dev);
+    int i;
+
+    for (i = 0; i < 2; ++i) {
+        AUD_close_out(&s->card, s->dac_voice[i]);
+    }
+
+    AUD_close_in(&s->card, s->adc_voice);
+    AUD_remove_card(&s->card);
+}
+
 static int es1370_init (PCIBus *bus)
 {
-    pci_create_simple (bus, -1, "ES1370");
+    pci_create_simple (bus, -1, TYPE_ES1370);
     return 0;
 }
 
@@ -1053,6 +1065,7 @@ static void es1370_class_init (ObjectClass *klass, void *data)
     PCIDeviceClass *k = PCI_DEVICE_CLASS (klass);
 
     k->realize = es1370_realize;
+    k->exit = es1370_exit;
     k->vendor_id = PCI_VENDOR_ID_ENSONIQ;
     k->device_id = PCI_DEVICE_ID_ENSONIQ_ES1370;
     k->class_id = PCI_CLASS_MULTIMEDIA_AUDIO;
@@ -1061,13 +1074,18 @@ static void es1370_class_init (ObjectClass *klass, void *data)
     set_bit(DEVICE_CATEGORY_SOUND, dc->categories);
     dc->desc = "ENSONIQ AudioPCI ES1370";
     dc->vmsd = &vmstate_es1370;
+    dc->reset = es1370_on_reset;
 }
 
 static const TypeInfo es1370_info = {
-    .name          = "ES1370",
+    .name          = TYPE_ES1370,
     .parent        = TYPE_PCI_DEVICE,
     .instance_size = sizeof (ES1370State),
     .class_init    = es1370_class_init,
+    .interfaces = (InterfaceInfo[]) {
+        { INTERFACE_CONVENTIONAL_PCI_DEVICE },
+        { },
+    },
 };
 
 static void es1370_register_types (void)

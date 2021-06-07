@@ -253,32 +253,31 @@ setup-puid
             THEN
          ENDOF
          2000000 OF                             \ 32-bit memory space?
-            decode-64 pci-next-mem !            \ Decode mem base address
+            decode-64 dup >r pci-next-mmio !    \ Decode base address
             decode-64 drop                      \ Forget the parent address
-            decode-64 2 / dup >r                \ Decode and calc size/2
-            pci-next-mem @ + dup pci-max-mem !  \ and calc max mem address
-            dup pci-next-mmio !                 \ which is the same as MMIO base
-            r> + pci-max-mmio !                 \ calc max MMIO address
+            decode-64 r> + pci-max-mmio !       \ calc max MMIO address
          ENDOF
          3000000 OF                             \ 64-bit memory space?
-	    decode-64 pci-next-mem64 !
-	    decode-64 drop                      \ Forget the parent address
-	    decode-64 pci-max-mem64 !
+            decode-64 dup >r pci-next-mem64 !
+            decode-64 drop                      \ Forget the parent address
+            decode-64 r> + pci-max-mem64 !
          ENDOF
       ENDCASE
    REPEAT
    ( prop-addr prop-len )
    2drop
 
+   \ If we do not have 64-bit prefetchable memory, split the 32-bit space:
+   pci-next-mem64 @ 0= IF
+      pci-next-mmio @ pci-next-mem !            \ Start of 32-bit prefetchable
+      pci-max-mmio @ pci-next-mmio @ - 2 /      \ Calculate new size
+      pci-next-mmio @ +                         \ The middle of the area
+      dup pci-max-mem !
+      pci-next-mmio !
+   THEN
+
    phb-debug? IF
-     ." pci-next-io   = " pci-next-io @ . cr
-     ." pci-max-io    = " pci-max-io  @ . cr
-     ." pci-next-mem  = " pci-next-mem @ . cr
-     ." pci-max-mem   = " pci-max-mem  @ . cr
-     ." pci-next-mmio = " pci-next-mmio @ . cr
-     ." pci-max-mmio  = " pci-max-mmio @ . cr
-     ." pci-next-mem64  = " pci-next-mem64 @ . cr
-     ." pci-max-mem64   = " pci-max-mem64  @ . cr
+      pci-var-out
    THEN
 ;
 
@@ -297,16 +296,24 @@ setup-puid
         CASE
             0 OF my-space pci-device-setup ENDOF  \ | set up the device
             1 OF my-space pci-bridge-setup ENDOF  \ | set up the bridge
-            dup OF my-space pci-htype@ pci-out ENDOF
+            dup OF my-space [char] ? pci-out ENDOF
         ENDCASE
         peer
     REPEAT drop
     get-parent set-node
 ;
 
-\ Landing routing to probe the popuated device tree
-: phb-pci-probe-bus ( busnr -- )
-    drop phb-pci-walk-bridge
+\ Similar to pci-bridge-probe, but without setting the secondary and
+\ subordinate bus numbers (since this has been done by QEMU already)
+: phb-pci-bridge-probe ( addr -- )
+    dup pci-bridge-set-bases                      \ Set up all Base Registers
+    dup func-pci-bridge-range-props               \ Set up temporary "range"
+    my-space pci-bus-scnd@ TO pci-bus-number      \ Set correct current bus number
+    pci-device-vec-len 1+ TO pci-device-vec-len   \ increase the device-slot vector depth
+    pci-enable                                    \ enable mem/IO transactions
+    phb-pci-walk-bridge                           \ and walk the secondary bus
+    pci-device-vec-len 1- TO pci-device-vec-len   \ decrease the device-slot vector depth
+    pci-bridge-set-limits                         \ Set up all Limit Registers
 ;
 
 \ Stub routine, as qemu has enumerated, we already have the device
@@ -324,11 +331,17 @@ setup-puid
    my-puid TO puid                  \ Set current puid
    phb-parse-ranges
    1 TO pci-hotplug-enabled
+   s" qemu,mem-bar-min-align" get-node get-property 0= IF
+       decode-int TO pci-mem-bar-min-align
+       2drop
+   ELSE
+       10000 TO pci-mem-bar-min-align
+   THEN
    s" qemu,phb-enumerated" get-node get-property 0<> IF
        1 0 (probe-pci-host-bridge)
    ELSE
        2drop
-       ['] phb-pci-probe-bus TO func-pci-probe-bus
+       ['] phb-pci-bridge-probe TO func-pci-bridge-probe
        ['] phb-pci-device-props TO func-pci-device-props
        phb-pci-walk-bridge          \ PHB device tree is already populated.
    THEN

@@ -234,6 +234,10 @@ class HTABSection(object):
 
         header = self.file.read32()
 
+        if (header == -1):
+            # "no HPT" encoding
+            return
+
         if (header > 0):
             # First section, just the hash shift
             return
@@ -251,6 +255,15 @@ class HTABSection(object):
 
     def getDict(self):
         return ""
+
+
+class ConfigurationSection(object):
+    def __init__(self, file):
+        self.file = file
+
+    def read(self):
+        name_len = self.file.read32()
+        name = self.file.readstr(len = name_len)
 
 class VMSDFieldGeneric(object):
     def __init__(self, desc, file):
@@ -474,6 +487,7 @@ class MigrationDump(object):
     QEMU_VM_SECTION_FULL  = 0x04
     QEMU_VM_SUBSECTION    = 0x05
     QEMU_VM_VMDESCRIPTION = 0x06
+    QEMU_VM_CONFIGURATION = 0x07
     QEMU_VM_SECTION_FOOTER= 0x7e
 
     def __init__(self, filename):
@@ -514,6 +528,9 @@ class MigrationDump(object):
             section_type = file.read8()
             if section_type == self.QEMU_VM_EOF:
                 break
+            elif section_type == self.QEMU_VM_CONFIGURATION:
+                section = ConfigurationSection(file)
+                section.read()
             elif section_type == self.QEMU_VM_SECTION_START or section_type == self.QEMU_VM_SECTION_FULL:
                 section_id = file.read32()
                 name = file.readstr()

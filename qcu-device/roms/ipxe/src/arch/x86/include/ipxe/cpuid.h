@@ -7,7 +7,7 @@
  *
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <stdint.h>
 
@@ -39,6 +39,9 @@ struct x86_features {
 /** Get standard features */
 #define CPUID_FEATURES 0x00000001UL
 
+/** Hypervisor is present */
+#define CPUID_FEATURES_INTEL_ECX_HYPERVISOR 0x80000000UL
+
 /** Get largest extended function */
 #define CPUID_AMD_MAX_FN 0x80000000UL
 
@@ -54,25 +57,32 @@ struct x86_features {
 /** Get CPU model */
 #define CPUID_MODEL 0x80000002UL
 
+/** Get APM information */
+#define CPUID_APM 0x80000007UL
+
+/** Invariant TSC */
+#define CPUID_APM_EDX_TSC_INVARIANT 0x00000100UL
+
 /**
  * Issue CPUID instruction
  *
- * @v operation		CPUID operation
+ * @v function		CPUID function (input via %eax)
+ * @v subfunction	CPUID subfunction (input via %ecx)
  * @v eax		Output via %eax
  * @v ebx		Output via %ebx
  * @v ecx		Output via %ecx
  * @v edx		Output via %edx
  */
 static inline __attribute__ (( always_inline )) void
-cpuid ( uint32_t operation, uint32_t *eax, uint32_t *ebx, uint32_t *ecx,
-	uint32_t *edx ) {
+cpuid ( uint32_t function, uint32_t subfunction, uint32_t *eax, uint32_t *ebx,
+	uint32_t *ecx, uint32_t *edx ) {
 
 	__asm__ ( "cpuid"
 		  : "=a" ( *eax ), "=b" ( *ebx ), "=c" ( *ecx ), "=d" ( *edx )
-		  : "0" ( operation ) );
+		  : "0" ( function ), "2" ( subfunction ) );
 }
 
-extern int cpuid_is_supported ( void );
+extern int cpuid_supported ( uint32_t function );
 extern void x86_features ( struct x86_features *features );
 
 #endif /* _IPXE_CPUID_H */

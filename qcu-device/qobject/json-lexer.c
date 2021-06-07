@@ -11,26 +11,32 @@
  *
  */
 
-#include "qapi/qmp/qstring.h"
-#include "qapi/qmp/qlist.h"
-#include "qapi/qmp/qdict.h"
-#include "qapi/qmp/qint.h"
+#include "qemu/osdep.h"
 #include "qemu-common.h"
 #include "qapi/qmp/json-lexer.h"
 
 #define MAX_TOKEN_SIZE (64ULL << 20)
 
 /*
- * \"([^\\\"]|(\\\"\\'\\\\\\/\\b\\f\\n\\r\\t\\u[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]))*\"
- * '([^\\']|(\\\"\\'\\\\\\/\\b\\f\\n\\r\\t\\u[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]))*'
- * 0|([1-9][0-9]*(.[0-9]+)?([eE]([-+])?[0-9]+))
+ * Required by JSON (RFC 7159):
+ *
+ * \"([^\\\"]|\\[\"'\\/bfnrt]|\\u[0-9a-fA-F]{4})*\"
+ * -?(0|[1-9][0-9]*)(.[0-9]+)?([eE][-+]?[0-9]+)?
  * [{}\[\],:]
- * [a-z]+
+ * [a-z]+   # covers null, true, false
+ *
+ * Extension of '' strings:
+ *
+ * '([^\\']|\\[\"'\\/bfnrt]|\\u[0-9a-fA-F]{4})*'
+ *
+ * Extension for vararg handling in JSON construction:
+ *
+ * %((l|ll|I64)?d|[ipsf])
  *
  */
 
 enum json_lexer_state {
-    IN_ERROR = 0,
+    IN_ERROR = 0,               /* must really be 0, see json_lexer[] */
     IN_DQ_UCODE3,
     IN_DQ_UCODE2,
     IN_DQ_UCODE1,
@@ -62,6 +68,8 @@ enum json_lexer_state {
     IN_START,
 };
 
+QEMU_BUILD_BUG_ON((int)JSON_MIN <= (int)IN_START);
+
 #define TERMINAL(state) [0 ... 0x7F] = (state)
 
 /* Return whether TERMINAL is a terminal state and the transition to it
@@ -71,6 +79,8 @@ enum json_lexer_state {
             (json_lexer[(old_state)][0] == (terminal))
 
 static const uint8_t json_lexer[][256] =  {
+    /* Relies on default initialization to IN_ERROR! */
+
     /* double quote string */
     [IN_DQ_UCODE3] = {
         ['0' ... '9'] = IN_DQ_STRING,
@@ -212,20 +222,23 @@ static const uint8_t json_lexer[][256] =  {
         ['\t'] = IN_WHITESPACE,
         ['\r'] = IN_WHITESPACE,
         ['\n'] = IN_WHITESPACE,
-    },        
+    },
 
     /* escape */
     [IN_ESCAPE_LL] = {
         ['d'] = JSON_ESCAPE,
+        ['u'] = JSON_ESCAPE,
     },
 
     [IN_ESCAPE_L] = {
         ['d'] = JSON_ESCAPE,
         ['l'] = IN_ESCAPE_LL,
+        ['u'] = JSON_ESCAPE,
     },
 
     [IN_ESCAPE_I64] = {
         ['d'] = JSON_ESCAPE,
+        ['u'] = JSON_ESCAPE,
     },
 
     [IN_ESCAPE_I6] = {
@@ -241,6 +254,7 @@ static const uint8_t json_lexer[][256] =  {
         ['i'] = JSON_ESCAPE,
         ['p'] = JSON_ESCAPE,
         ['s'] = JSON_ESCAPE,
+        ['u'] = JSON_ESCAPE,
         ['f'] = JSON_ESCAPE,
         ['l'] = IN_ESCAPE_L,
         ['I'] = IN_ESCAPE_I,
@@ -253,12 +267,12 @@ static const uint8_t json_lexer[][256] =  {
         ['0'] = IN_ZERO,
         ['1' ... '9'] = IN_NONZERO_NUMBER,
         ['-'] = IN_NEG_NONZERO_NUMBER,
-        ['{'] = JSON_OPERATOR,
-        ['}'] = JSON_OPERATOR,
-        ['['] = JSON_OPERATOR,
-        [']'] = JSON_OPERATOR,
-        [','] = JSON_OPERATOR,
-        [':'] = JSON_OPERATOR,
+        ['{'] = JSON_LCURLY,
+        ['}'] = JSON_RCURLY,
+        ['['] = JSON_LSQUARE,
+        [']'] = JSON_RSQUARE,
+        [','] = JSON_COMMA,
+        [':'] = JSON_COLON,
         ['a' ... 'z'] = IN_KEYWORD,
         ['%'] = IN_ESCAPE,
         [' '] = IN_WHITESPACE,
@@ -272,7 +286,7 @@ void json_lexer_init(JSONLexer *lexer, JSONLexerEmitter func)
 {
     lexer->emit = func;
     lexer->state = IN_START;
-    lexer->token = qstring_new();
+    lexer->token = g_string_sized_new(3);
     lexer->x = lexer->y = 0;
 }
 
@@ -287,14 +301,20 @@ static int json_lexer_feed_char(JSONLexer *lexer, char ch, bool flush)
     }
 
     do {
+        assert(lexer->state <= ARRAY_SIZE(json_lexer));
         new_state = json_lexer[lexer->state][(uint8_t)ch];
         char_consumed = !TERMINAL_NEEDED_LOOKAHEAD(lexer->state, new_state);
         if (char_consumed) {
-            qstring_append_chr(lexer->token, ch);
+            g_string_append_c(lexer->token, ch);
         }
 
         switch (new_state) {
-        case JSON_OPERATOR:
+        case JSON_LCURLY:
+        case JSON_RCURLY:
+        case JSON_LSQUARE:
+        case JSON_RSQUARE:
+        case JSON_COLON:
+        case JSON_COMMA:
         case JSON_ESCAPE:
         case JSON_INTEGER:
         case JSON_FLOAT:
@@ -303,8 +323,7 @@ static int json_lexer_feed_char(JSONLexer *lexer, char ch, bool flush)
             lexer->emit(lexer, lexer->token, new_state, lexer->x, lexer->y);
             /* fall through */
         case JSON_SKIP:
-            QDECREF(lexer->token);
-            lexer->token = qstring_new();
+            g_string_truncate(lexer->token, 0);
             new_state = IN_START;
             break;
         case IN_ERROR:
@@ -322,8 +341,7 @@ static int json_lexer_feed_char(JSONLexer *lexer, char ch, bool flush)
              * induce an error/flush state.
              */
             lexer->emit(lexer, lexer->token, JSON_ERROR, lexer->x, lexer->y);
-            QDECREF(lexer->token);
-            lexer->token = qstring_new();
+            g_string_truncate(lexer->token, 0);
             new_state = IN_START;
             lexer->state = new_state;
             return 0;
@@ -336,10 +354,9 @@ static int json_lexer_feed_char(JSONLexer *lexer, char ch, bool flush)
     /* Do not let a single token grow to an arbitrarily large size,
      * this is a security consideration.
      */
-    if (lexer->token->length > MAX_TOKEN_SIZE) {
+    if (lexer->token->len > MAX_TOKEN_SIZE) {
         lexer->emit(lexer, lexer->token, lexer->state, lexer->x, lexer->y);
-        QDECREF(lexer->token);
-        lexer->token = qstring_new();
+        g_string_truncate(lexer->token, 0);
         lexer->state = IN_START;
     }
 
@@ -369,5 +386,5 @@ int json_lexer_flush(JSONLexer *lexer)
 
 void json_lexer_destroy(JSONLexer *lexer)
 {
-    QDECREF(lexer->token);
+    g_string_free(lexer->token, true);
 }

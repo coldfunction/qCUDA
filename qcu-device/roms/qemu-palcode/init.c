@@ -40,7 +40,7 @@
 
 struct hwrpb_combine {
   struct hwrpb_struct hwrpb;
-  struct percpu_struct processor;
+  struct percpu_struct processor[4];
   struct memdesc_struct md;
   struct memclust_struct mc[2];
   struct crb_struct crb;
@@ -138,10 +138,11 @@ init_page_table(void)
 }
 
 static void
-init_hwrpb (unsigned long memsize)
+init_hwrpb (unsigned long memsize, unsigned long cpus)
 {
   unsigned long pal_pages;
   unsigned long amask;
+  unsigned long i;
   
   hwrpb.hwrpb.phys_addr = PA(&hwrpb);
 
@@ -186,14 +187,19 @@ init_hwrpb (unsigned long memsize)
   hwrpb.hwrpb.sys_type = SYS_TYPE;
   hwrpb.hwrpb.sys_variation = SYS_VARIATION;
   hwrpb.hwrpb.sys_revision = SYS_REVISION;
-  hwrpb.processor.type = hwrpb.hwrpb.cpuid;
+  for (i = 0; i < cpus; ++i)
+    {
+      /* ??? Look up these bits.  Snagging the value examined by the kernel. */
+      hwrpb.processor[i].flags = 0x1cc;
+      hwrpb.processor[i].type = hwrpb.hwrpb.cpuid;
+    }
 
   hwrpb.hwrpb.intr_freq = HZ * 4096;
   hwrpb.hwrpb.cycle_freq = 250000000;	/* QEMU architects 250MHz.  */
 
   hwrpb.hwrpb.vptb = VPTPTR;
 
-  hwrpb.hwrpb.nr_processors = 1;
+  hwrpb.hwrpb.nr_processors = cpus;
   hwrpb.hwrpb.processor_size = sizeof(struct percpu_struct);
   hwrpb.hwrpb.processor_offset = offsetof(struct hwrpb_combine, processor);
 
@@ -268,13 +274,25 @@ init_i8259 (void)
   outb(0x20, PORT_PIC1_CMD);
 }
 
+static void __attribute__((noreturn))
+swppal(void *entry, void *pcb)
+{
+  register int variant __asm__("$16") = 2;	/* OSF/1 PALcode */
+  register void *pc __asm__("$17") = entry;
+  register unsigned long pa_pcb __asm__("$18") = PA(pcb);
+  register unsigned long vptptr __asm__("$19") = VPTPTR;
+
+  asm("call_pal 0x0a" : : "r"(variant), "r"(pc), "r"(pa_pcb), "r"(vptptr));
+  __builtin_unreachable ();
+}
+
 void
-do_start(unsigned long memsize, void (*kernel_entry)(void), long cpus)
+do_start(unsigned long memsize, void (*kernel_entry)(void), unsigned long cpus)
 {
   last_alloc = _end;
 
   init_page_table();
-  init_hwrpb(memsize);
+  init_hwrpb(memsize, cpus);
   init_pcb();
   init_i8259();
   uart_init();
@@ -282,29 +300,38 @@ do_start(unsigned long memsize, void (*kernel_entry)(void), long cpus)
   pci_setup();
   vgahw_init();
 
-  {
-    register int variant __asm__("$16") = 2;	/* OSF/1 PALcode */
-    register void (*pc)(void) __asm__("$17");
-    register unsigned long pa_pcb __asm__("$18");
-    register unsigned long vptptr __asm__("$19");
-
-    pc = (kernel_entry ? kernel_entry : do_console);
-    pa_pcb = PA(&pcb);
-    vptptr = VPTPTR;
-    asm("call_pal 0x0a" : : "r"(variant), "r"(pc), "r"(pa_pcb), "r"(vptptr));
-  }
-  __builtin_unreachable ();
+  swppal(kernel_entry ? kernel_entry : do_console, &pcb);
 }
 
 void
-do_start_wait(void)
+do_start_wait(unsigned long cpuid)
 {
   while (1)
     {
-      // WtInt with interrupts off.  Rely on the fact that QEMU will
-      // un-halt the CPU when an interrupt arrives.
-      asm("lda $16,-1\n\tcall_pal 0x3e" : : : "$0", "$16");
+      /* Wait 1ms for the kernel to wake us.  */
+      ndelay(1000000);
 
-      // FIXME do something with the IPI.
+      if (hwrpb.hwrpb.rxrdy & (1ull << cpuid))
+	{
+	  /* ??? The only message I know of is "START\r\n".
+	     I can't be bothered to verify more than 4 characters.  */
+	  /* ??? The Linux kernel fills in, but does not require,
+	     CPU_restart_data.  It just sets that to the same address
+	     as CPU_restart itself.  Our swppal *does* put the PC into
+	     $26 and $27, the latter of which the kernel does rely upon.  */
+
+	  unsigned int len = hwrpb.processor[cpuid].ipc_buffer[0];
+	  unsigned int msg = hwrpb.processor[cpuid].ipc_buffer[1];
+	  void *CPU_restart = hwrpb.hwrpb.CPU_restart;
+	  __sync_synchronize();
+	  hwrpb.hwrpb.rxrdy = 0;
+
+          if (len == 7 && msg == ('S' | 'T' << 8 | 'A' << 16 | 'R' << 24))
+	    {
+	      /* Set bootstrap in progress */
+	      hwrpb.processor[cpuid].flags |= 1;
+	      swppal(CPU_restart, hwrpb.processor[cpuid].hwpcb);
+	    }
+	}
     }
 }

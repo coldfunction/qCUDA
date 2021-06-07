@@ -358,10 +358,32 @@ partition_t get_partition(unsigned int type, char *name)
 	return ret;
 }
 
+/* Get partition specified by a Forth string */
+partition_t get_partition_fs(char *name, int namelen)
+{
+	char buf[namelen + 1];
+
+	memcpy(buf, name, namelen);
+	buf[namelen] = 0;
+
+	return get_partition(-1, buf);
+}
+
 void erase_nvram(int offset, int len)
 {
 	int i;
 
+#ifdef RTAS_NVRAM
+	char *erase_buf = get_nvram_buffer(len);
+	if (erase_buf) {
+		/* Speed up by erasing all memory at once */
+		memset(erase_buf, 0, len);
+		nvram_store(offset, erase_buf, len);
+		free_nvram_buffer(erase_buf);
+		return;
+	}
+	/* If get_nvram_buffer failed, fall through to default code */
+#endif
 	for (i=offset; i<offset+len; i++)
 		nvram_write_byte(i, 0);
 }
@@ -464,6 +486,22 @@ partition_t new_nvram_partition(int type, char *name, int len)
 	create_free_partition();
 
 	return new_part;
+}
+
+partition_t new_nvram_partition_fs(int type, char *name, int namelen, int len)
+{
+	char buf[13];
+	int i;
+
+	for (i = 0; i < 12; i++) {
+		if (i < namelen)
+			buf[i] = name[i];
+		else
+			buf[i] = 0;
+	}
+	buf[12] = 0;
+
+	return new_nvram_partition(type, buf, len);
 }
 
 /**

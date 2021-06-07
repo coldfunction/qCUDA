@@ -10,34 +10,25 @@
  * See the COPYING.LIB file in the top-level directory.
  */
 
-#include <glib.h>
-#include <string.h>
+#include "qemu/osdep.h"
 #include "libqtest.h"
+#include "libqos/virtio.h"
+#include "qapi/qmp/qdict.h"
 
 static void drive_add(void)
 {
-    QDict *response;
+    char *resp = hmp("drive_add 0 if=none,id=drive0");
 
-    response = qmp("{'execute': 'human-monitor-command',"
-                   " 'arguments': {"
-                   "   'command-line': 'drive_add 0 if=none,id=drive0'"
-                   "}}");
-    g_assert(response);
-    g_assert_cmpstr(qdict_get_try_str(response, "return"), ==, "OK\r\n");
-    QDECREF(response);
+    g_assert_cmpstr(resp, ==, "OK\r\n");
+    g_free(resp);
 }
 
 static void drive_del(void)
 {
-    QDict *response;
+    char *resp = hmp("drive_del drive0");
 
-    response = qmp("{'execute': 'human-monitor-command',"
-                   " 'arguments': {"
-                   "   'command-line': 'drive_del drive0'"
-                   "}}");
-    g_assert(response);
-    g_assert_cmpstr(qdict_get_try_str(response, "return"), ==, "");
-    QDECREF(response);
+    g_assert_cmpstr(resp, ==, "");
+    g_free(resp);
 }
 
 static void device_del(void)
@@ -76,14 +67,14 @@ static void test_after_failed_device_add(void)
 
     qtest_start("-drive if=none,id=drive0");
 
-    /* Make device_add fail.  If this leaks the virtio-blk-pci device then a
+    /* Make device_add fail. If this leaks the virtio-blk device then a
      * reference to drive0 will also be held (via qdev properties).
      */
     response = qmp("{'execute': 'device_add',"
                    " 'arguments': {"
-                   "   'driver': 'virtio-blk-pci',"
+                   "   'driver': 'virtio-blk-%s',"
                    "   'drive': 'drive0'"
-                   "}}");
+                   "}}", qvirtio_get_dev_type());
     g_assert(response);
     error = qdict_get_qdict(response, "error");
     g_assert_cmpstr(qdict_get_try_str(error, "class"), ==, "GenericError");
@@ -93,7 +84,7 @@ static void test_after_failed_device_add(void)
     drive_del();
 
     /* Try to re-add the drive.  This fails with duplicate IDs if a leaked
-     * virtio-blk-pci exists that holds a reference to the old drive0.
+     * virtio-blk device exists that holds a reference to the old drive0.
      */
     drive_add();
 
@@ -102,10 +93,14 @@ static void test_after_failed_device_add(void)
 
 static void test_drive_del_device_del(void)
 {
+    char *args;
+
     /* Start with a drive used by a device that unplugs instantaneously */
-    qtest_start("-drive if=none,id=drive0,file=/dev/null,format=raw"
-                " -device virtio-scsi-pci"
-                " -device scsi-hd,drive=drive0,id=dev0");
+    args = g_strdup_printf("-drive if=none,id=drive0,file=null-co://,format=raw"
+                           " -device virtio-scsi-%s"
+                           " -device scsi-hd,drive=drive0,id=dev0",
+                           qvirtio_get_dev_type());
+    qtest_start(args);
 
     /*
      * Delete the drive, and then the device
@@ -115,6 +110,7 @@ static void test_drive_del_device_del(void)
     device_del();
 
     qtest_end();
+    g_free(args);
 }
 
 int main(int argc, char **argv)
@@ -125,8 +121,10 @@ int main(int argc, char **argv)
 
     qtest_add_func("/drive_del/without-dev", test_drive_without_dev);
 
-    /* TODO I guess any arch with PCI would do */
-    if (!strcmp(arch, "i386") || !strcmp(arch, "x86_64")) {
+    /* TODO I guess any arch with a hot-pluggable virtio bus would do */
+    if (!strcmp(arch, "i386") || !strcmp(arch, "x86_64") ||
+        !strcmp(arch, "ppc") || !strcmp(arch, "ppc64") ||
+        !strcmp(arch, "s390x")) {
         qtest_add_func("/drive_del/after_failed_device_add",
                        test_after_failed_device_add);
         qtest_add_func("/blockdev/drive_del_device_del",

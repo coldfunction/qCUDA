@@ -173,10 +173,7 @@ THEN
 
 200 cp
 
-#include <slof-logo.fs>
 #include <banner.fs>
-
-: .banner .slof-logo .banner ;
 
 \ Get the secondary CPUs into our own spinloop.
 f8000050 rl@ CONSTANT master-cpu
@@ -208,10 +205,6 @@ d# 14318378 VALUE tb-frequency   \ default value - needed for "ms" to work
 260 cp
 
 #include <timebase.fs>
-
-270 cp
-
-#include <fcode/evaluator.fs>
 
 280 cp
 
@@ -547,6 +540,12 @@ cr
 
 \ this CATCH is to ensure the code bellow always executes:  boot may ABORT!
 ' start-it CATCH drop
+
+: boot
+    boot
+    \ When we return from boot print the banner again.
+    .banner
+;
 
 #include <history.fs>
 nvram-history? [IF]

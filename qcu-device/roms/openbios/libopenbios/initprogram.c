@@ -24,6 +24,7 @@
 #include "libopenbios/aout_load.h"
 #endif
 
+#include "libopenbios/bootcode_load.h"
 #include "libopenbios/bootinfo_load.h"
 #include "libopenbios/elf_load.h"
 #include "libopenbios/fcode_load.h"
@@ -43,6 +44,13 @@ void init_program(void)
 #ifdef CONFIG_LOADER_AOUT
 	if (is_aout((struct exec *)cell2pointer(addr))) {
 		aout_init_program();
+		return;
+	}
+#endif
+
+#ifdef CONFIG_LOADER_BOOTCODE
+	if (is_bootcode((char *)cell2pointer(addr))) {
+		bootcode_init_program();
 		return;
 	}
 #endif
@@ -82,4 +90,29 @@ void init_program(void)
 	}
 #endif
 
+}
+
+void init_fcode_context(void)
+{
+	/* Execute FCode payload */
+	printk("Evaluating FCode...\n");
+	fword("load-base");
+	PUSH(1);
+	fword("byte-load");
+}
+
+
+void init_forth_context(void)
+{
+	/* Execute Forth payload */
+	printk("Evaluating Forth...\n");
+	fword("load-base");
+	feval("load-state >ls.file-size @");
+	fword("eval2");
+}
+
+void go(void)
+{
+	/* Switch to the current context */
+	start_elf();
 }

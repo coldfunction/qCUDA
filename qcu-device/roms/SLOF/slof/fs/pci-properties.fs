@@ -91,17 +91,37 @@
 \ ***************************************************************************************
 \ align the current mem and set var to next mem
 \ align with a size of 0 returns 0 !!!
-: assign-var ( size var -- al-mem )
-        2dup @                          \ ( size var size cur-mem ) read current free mem
-        swap #aligned                   \ ( size var al-mem )       align the mem to the size
-        dup 2swap -rot +                \ ( al-mem var new-mem )    add size to aligned mem
-        swap !                          \ ( al-mem )                set variable to new mem
+: assign-var-align ( size align var -- al-mem )
+        dup >r @                        \ ( size align cur-mem )
+        swap #aligned                   \ ( size al-mem )
+        tuck +                          \ ( al-mem new-mem )
+        r> !                            \ ( al-mem )
+;
+
+: assign-var-min-align ( size min-align var -- al-mem )
+        >r over umax                    \ ( size align )
+        r> assign-var-align             \ ( al-mem )
 ;
 
 \ set bar to current free mem ( in variable ) and set variable to next free mem
 : assign-bar-value32 ( bar size var -- 4 )
         over IF                         \ IF size > 0
-                assign-var              \ | ( bar al-mem ) set variable to next mem
+                >r                      \ | ( bar size )
+                pci-mem-bar-min-align   \ | ( bar size min-align )
+                r> assign-var-min-align \ | ( bar al-mem ) set variable to next mem
+                swap rtas-config-l!     \ | ( -- )         set the bar to al-mem
+        ELSE                            \ ELSE
+                2drop drop              \ | clear stack
+        THEN                            \ FI
+        4                               \ size of the base-address-register
+;
+
+\ set bar to current free mem ( in variable ) and set variable to next free mem
+: assign-io-bar-value32 ( bar size var -- 4 )
+        over IF                         \ IF size > 0
+                >r                      \ | ( bar size )
+                dup                     \ | ( bar size size-align )
+                r> assign-var-align     \ | ( bar al-mem ) set variable to next mem
                 swap rtas-config-l!     \ | ( -- )         set the bar to al-mem
         ELSE                            \ ELSE
                 2drop drop              \ | clear stack
@@ -112,7 +132,9 @@
 \ set bar to current free mem ( in variable ) and set variable to next free mem
 : assign-bar-value64 ( bar size var -- 8 )
         over IF                         \ IF size > 0
-                assign-var              \ | ( bar al-mem ) set variable to next mem
+                >r                      \ | ( bar size )
+                pci-mem-bar-min-align   \ | ( bar size min-align )
+                r> assign-var-min-align \ | ( bar al-mem ) set variable to next mem
                 swap                    \ | ( al-mem addr ) calc config-addr of this bar
                 2dup rtas-config-l!     \ | ( al-mem addr ) set the Lower part of the bar to al-mem
                 4 + swap 20 rshift      \ | ( al-mem>>32 addr ) prepare the upper part of the al-mem
@@ -137,18 +159,19 @@
 \ Setup a prefetchable 32bit BAR and return its size
 : assign-mem32-bar ( bar-addr -- 4 )
         dup pci-bar-size-mem32          \ fetch size
-        pci-next-mem                    \ var to change
+        \ Do we have a dedicated 32-bit prefetchable area? If not, use MMIO
+        pci-next-mem @ IF
+            pci-next-mem
+        ELSE
+            pci-next-mmio
+        THEN
         assign-bar-value32              \ and set it all
 ;
 
 \ Setup a non-prefetchable 64bit BAR and return its size
 : assign-mmio64-bar ( bar-addr -- 8 )
         dup pci-bar-size-mem64          \ fetch size
-        pci-next-mem64 @ 0 = IF          \ Check if we have 64-bit memory range
-	    pci-next-mmio
-	ELSE
-	    pci-next-mem64              \ for board-qemu we will use same range
-	THEN
+        pci-next-mmio
         assign-bar-value64              \ and set it all
 ;
 
@@ -163,7 +186,7 @@
 : assign-io-bar ( bar-addr -- 4 )
         dup pci-bar-size-io             \ fetch size
         pci-next-io                     \ var to change
-        assign-bar-value32              \ and set it all
+        assign-io-bar-value32           \ and set it all
 ;
 
 \ Setup an Expansion ROM bar
@@ -232,14 +255,16 @@
 \ ***************************************************************************************
 \ Generating the assigned-addresses property
 \ ***************************************************************************************
-\ generate assigned-addresses property for 64Bit MEM-BAR and return BAR-reg-size
+\ generate assigned-addresses property for non-prefetchable 64Bit MEM-BAR and
+\ return BAR-reg-size. Note: We use "32-bit" as space code here, since these
+\ BARs are allocated from the 32-bit MMIO window (see assign-mmio64-bar)
 : gen-mem64-bar-prop ( prop-addr prop-len bar-addr -- prop-addr prop-len 8 )
         dup pci-bar-size-mem64                  \ fetch BAR Size        ( paddr plen baddr bsize )
         dup IF                                  \ IF Size > 0
                 >r dup rtas-config-l@           \ | save size and fetch lower 32 bits ( paddr plen baddr val.lo R: size)
                 over 4 + rtas-config-l@         \ | fetch upper 32 bits               ( paddr plen baddr val.lo val.hi R: size)
                 20 lshift + -10 and >r          \ | calc 64 bit value and save it     ( paddr plen baddr R: size val )
-                83000000 or encode-int+         \ | Encode config addr                ( paddr plen R: size val )
+                82000000 or encode-int+         \ | Encode config addr                ( paddr plen R: size val )
                 r> encode-64+                   \ | Encode assigned addr              ( paddr plen R: size )
                 r> encode-64+                   \ | Encode size                       ( paddr plen )
         ELSE                                    \ ELSE
@@ -393,8 +418,9 @@
         4 pick 28 + rtas-config-l@      \ fetch upper Basebits  ( addr paddr plen limit.31:0 base.31:0 base.63:32 )
         20 lshift or swap               \ and calc Base         ( addr paddr plen base.63:0 limit.31:0 )
         4 pick 2C + rtas-config-l@      \ fetch upper Limitbits ( addr paddr plen base.63:0 limit.31:0 limit.63:32 )
-        20 lshift or                    \ and calc Limit        ( addr paddr plen base.63:0 limit.63:0 )
-        42000000 pci-bridge-gen-range   \ and generate it       ( addr paddr plen )
+        dup -rot 20 lshift or swap      \ and calc Limit        ( addr paddr plen base.63:0 limit.63:0 limit.63:32 )
+        IF 43000000 ELSE 42000000 THEN  \ 64-bit or 32-bit?     ( addr paddr plen base.63:0 limit.63:0 type )
+        pci-bridge-gen-range            \ and generate it       ( addr paddr plen )
 ;
 
 \ generate an io space to the ranges property
@@ -643,7 +669,7 @@
         pci-device-slots >r             \ save the slot array on return stack
         dup pci-common-props            \ set the common properties before scanning the bus
         s" pci" device-type             \ the type is allways "pci"
-        dup pci-bridge-probe            \ find all device connected to it
+        dup func-pci-bridge-probe       \ find all device connected to it
         dup assign-all-bridge-bars      \ set up all memory access BARs
         dup pci-set-irq-line            \ set the interrupt pin
         dup pci-set-capabilities        \ set up the capabilities
