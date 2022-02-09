@@ -35,20 +35,18 @@
 	.ent	Sys_Setup
 Sys_Setup:
 	.frame	$sp, 0, p7, 0
-	lda		t0, TYPHOON_CCHIP_DIR0
-	lda		t1, TYPHOON_CCHIP_DIR2
-	lda		t2, TYPHOON_CCHIP_IIC0
-	lda		t3, TYPHOON_CCHIP_IIC2
+	LOAD_PHYS_CCHIP	t0
+	lda		t0, TYPHOON_CCHIP_DIR0(t0)
+	// DIR[23] differ from DIR[01] by 0x400
+	// DIR[13] differ from DIR[02] by 0x40
 	and		a0, 2, t4
-	cmovne		t4, t1, t0
-	cmovne		t4, t3, t2
-	and		a0, 1, t4
-	sll		t4, 6, t4
+	and		a0, 1, t3
+	sll		t4, 9, t4
+	sll		t3, 6, t3
 	addq		t0, t4, t0
-	addq		t2, t4, t2
-	LOAD_PHYS_CCHIP	t4
-	addq		t0, t4, t0
-	addq		t2, t4, t2
+	addq		t0, t3, t0
+	// IIC[0-4] differ from DIR[0-4] by 0x100
+	lda		t2, 0x100(t0)
 	mtpr		t0, ptCpuDIR
 	mtpr		t2, ptCpuIIC
 	ret

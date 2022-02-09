@@ -24,7 +24,7 @@ TARGET = ../libhvcall.a
 
 all: $(TARGET)
 
-SRCS = brokensc1.c
+SRCS = brokensc1.c rfill.c
 SRCSS = hvcall.S
 
 

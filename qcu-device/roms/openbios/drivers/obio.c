@@ -1,7 +1,7 @@
 /*
  *   OpenBIOS Sparc OBIO driver
  *
- *   (C) 2004 Stefan Reinauer <stepan@openbios.org>
+ *   (C) 2004 Stefan Reinauer
  *   (C) 2005 Ed Schouten <ed@fxq.nl>
  *
  *   This program is free software; you can redistribute it and/or
@@ -26,8 +26,6 @@
 #define	PROMDEV_SCREEN	0		/* output to screen */
 #define	PROMDEV_TTYA	1		/* in/out to ttya */
 
-/* DECLARE data structures for the nodes.  */
-DECLARE_UNNAMED_NODE( ob_obio, INSTALL_OPEN, sizeof(int) );
 
 void
 ob_new_obio_device(const char *name, const char *type)
@@ -226,6 +224,12 @@ volatile unsigned char *power_reg;
 volatile unsigned int *reset_reg;
 
 static void
+sparc32_power_off(void)
+{
+    *power_reg = 1;
+}
+
+static void
 sparc32_reset_all(void)
 {
     *reset_reg = 1;
@@ -238,6 +242,10 @@ ob_aux2_reset_init(uint64_t base, uint64_t offset, int intr)
     ob_new_obio_device("power", NULL);
 
     power_reg = (void *)ob_reg(base, offset, AUXIO2_REGS, 1);
+
+    bind_func("sparc32-power-off", sparc32_power_off);
+    push_str("' sparc32-power-off to power-off");
+    fword("eval");
 
     // Not in device tree
     reset_reg = (unsigned int *)ofmem_map_io(base + (uint64_t)SLAVIO_RESET, RESET_REGS);
@@ -397,45 +405,6 @@ ob_smp_init(unsigned long mem_size)
 }
 
 static void
-ob_obio_open(__attribute__((unused))int *idx)
-{
-	int ret=1;
-	RET ( -ret );
-}
-
-static void
-ob_obio_close(__attribute__((unused))int *idx)
-{
-	selfword("close-deblocker");
-}
-
-static void
-ob_obio_initialize(__attribute__((unused))int *idx)
-{
-    push_str("/");
-    fword("find-device");
-    fword("new-device");
-
-    push_str("obio");
-    fword("device-name");
-
-    push_str("hierarchical");
-    fword("device-type");
-
-    PUSH(2);
-    fword("encode-int");
-    push_str("#address-cells");
-    fword("property");
-
-    PUSH(1);
-    fword("encode-int");
-    push_str("#size-cells");
-    fword("property");
-
-    fword("finish-device");
-}
-
-static void
 ob_set_obio_ranges(uint64_t base)
 {
     push_str("/obio");
@@ -458,27 +427,6 @@ ob_set_obio_ranges(uint64_t base)
     fword("property");
 }
 
-static void
-ob_obio_decodeunit(__attribute__((unused)) int *idx)
-{
-    fword("decode-unit-sbus");
-}
-
-
-static void
-ob_obio_encodeunit(__attribute__((unused)) int *idx)
-{
-    fword("encode-unit-sbus");
-}
-
-NODE_METHODS(ob_obio) = {
-	{ NULL,			ob_obio_initialize	},
-	{ "open",		ob_obio_open		},
-	{ "close",		ob_obio_close		},
-	{ "encode-unit",	ob_obio_encodeunit	},
-	{ "decode-unit",	ob_obio_decodeunit	},
-};
-
 
 int
 ob_obio_init(uint64_t slavio_base, unsigned long fd_offset,
@@ -491,10 +439,6 @@ ob_obio_init(uint64_t slavio_base, unsigned long fd_offset,
     // http://www.ibiblio.org/pub/historic-linux/early-ports/Sparc/NCR/NCR89C105.txt
 
     //printk("Initializing OBIO devices...\n");
-#if 0 // XXX
-    REGISTER_NAMED_NODE(ob_obio, "/obio");
-    device_end();
-#endif
     ob_set_obio_ranges(slavio_base);
 
     // Zilog Z8530 serial ports, see http://www.zilog.com

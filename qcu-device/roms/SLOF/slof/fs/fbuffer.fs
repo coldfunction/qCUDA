@@ -19,6 +19,7 @@
 0 VALUE screen-height
 0 VALUE screen-width
 0 VALUE screen-depth
+0 VALUE screen-line-bytes
 0 VALUE window-top
 0 VALUE window-left
 
@@ -54,10 +55,10 @@
 : fb8-background inverse? ;
 : fb8-foreground inverse? invert ;
 
-: fb8-lines2bytes ( #lines -- #bytes ) char-height * screen-width * screen-depth * ;
+: fb8-lines2bytes ( #lines -- #bytes ) char-height * screen-line-bytes * ;
 : fb8-columns2bytes ( #columns -- #bytes ) char-width * screen-depth * ;
 : fb8-line2addr ( line# -- addr )
-	char-height * window-top + screen-width * screen-depth *
+	char-height * window-top + screen-line-bytes *
 	frame-buffer-adr + window-left screen-depth * +
 ;
 
@@ -98,9 +99,10 @@ CREATE bitmap-buffer 400 4 * allot
 
 : fb8-toggle-cursor ( -- )
 	line# fb8-line2addr column# fb8-columns2bytes +
-	char-height 0 ?DO
-		char-width screen-depth * 0 ?DO dup dup rb@ -1 xor swap rb! 1+ LOOP
-		screen-width screen-depth * + char-width screen-depth * -
+	char-height 2 - screen-line-bytes * +
+	2 0 ?DO
+		dup char-width screen-depth * invert-region
+		screen-line-bytes +
 	LOOP drop
 ;
 
@@ -110,7 +112,7 @@ CREATE bitmap-buffer 400 4 * allot
 	line# fb8-line2addr column# fb8-columns2bytes + ( bitmap-buf fb-addr )
 	char-height 0 ?DO
 		2dup char-width screen-depth * mrmove
-		screen-width screen-depth * + >r char-width screen-depth * + r>
+		screen-line-bytes + >r char-width screen-depth * + r>
 	LOOP 2drop
     ELSE 2drop r> 3drop THEN
 ;
@@ -135,12 +137,12 @@ CREATE bitmap-buffer 400 4 * allot
 		fb8-columns2bytes swap fb8-columns2bytes tuck -
 		over r@ tuck + rot char-height 0 ?DO
 			3dup rmove
-			-rot screen-width screen-depth * tuck + -rot + swap rot
+			-rot screen-line-bytes tuck + -rot + swap rot
 		LOOP
 		3drop r>
 	THEN
 	char-height 0 ?DO
-		dup 2 pick fb8-erase-block screen-width screen-depth * +
+		dup 2 pick fb8-erase-block screen-line-bytes +
 	LOOP
 	2drop
 ;
@@ -153,12 +155,12 @@ CREATE bitmap-buffer 400 4 * allot
 		fb8-columns2bytes swap fb8-columns2bytes tuck -
 		over r@ + 2dup + r> swap >r rot char-height 0 ?DO
 			3dup rmove
-			-rot screen-width screen-depth * tuck + -rot + swap rot
+			-rot screen-line-bytes tuck + -rot + swap rot
 		LOOP
 		3drop r> over -
 	THEN
 	char-height 0 ?DO
-		dup 2 pick fb8-erase-block screen-width screen-depth * +
+		dup 2 pick fb8-erase-block screen-line-bytes +
 	LOOP
 	2drop
 ;
@@ -166,13 +168,11 @@ CREATE bitmap-buffer 400 4 * allot
 : fb8-reset-screen ( -- ) ( Left as no-op by design ) ;
 
 : fb8-erase-screen ( -- )
-	frame-buffer-adr screen-height screen-width * screen-depth * fb8-erase-block
+	frame-buffer-adr screen-height screen-line-bytes * fb8-erase-block
 ;
 
 : fb8-invert-screen ( -- )
-	frame-buffer-adr screen-height screen-width * screen-depth * 2dup /x / 0 ?DO
-		dup rx@ -1 xor over rx! xa1+
-	LOOP 3drop
+	frame-buffer-adr screen-height screen-line-bytes * invert-region
 ;
 
 : fb8-blink-screen ( -- ) fb8-invert-screen fb8-invert-screen ;
@@ -180,6 +180,7 @@ CREATE bitmap-buffer 400 4 * allot
 : fb8-install ( width height #columns #lines -- )
 	1 to screen-depth
 	2swap  to screen-height  to screen-width
+	screen-width to screen-line-bytes
 	screen-#rows min to #lines
 	screen-#columns min to #columns
 	screen-height char-height #lines * - 2/ to window-top
@@ -201,61 +202,8 @@ CREATE bitmap-buffer 400 4 * allot
 	>r
 	fb8-install
 	r> to screen-depth
+	screen-width screen-depth * to screen-line-bytes
 ;
-
-
-\ Install display related FCODE evaluator tokens
-: fb8-set-tokens  ( -- )
-	['] is-install        0 11C set-token
-	['] is-remove         0 11D set-token
-	['] is-selftest       0 11E set-token
-
-	['] #lines            0 150 set-token
-	['] #columns          0 151 set-token
-	['] line#             0 152 set-token
-	['] column#           0 153 set-token
-	['] inverse?          0 154 set-token
-	['] inverse-screen?   0 155 set-token
-	['] draw-character    0 157 set-token
-	['] reset-screen      0 158 set-token
-	['] toggle-cursor     0 159 set-token
-	['] erase-screen      0 15A set-token
-	['] blink-screen      0 15B set-token
-	['] invert-screen     0 15C set-token
-	['] insert-characters 0 15D set-token
-	['] delete-characters 0 15E set-token
-	['] insert-lines      0 15F set-token
-	['] delete-lines      0 160 set-token
-	['] draw-logo         0 161 set-token
-	['] frame-buffer-adr  0 162 set-token
-	['] screen-height     0 163 set-token
-	['] screen-width      0 164 set-token
-	['] window-top        0 165 set-token
-	['] window-left       0 166 set-token
-	\ ['] foreground-color  0 168 set-token  \ 16-color extension - n/a
-	\ ['] background-color  0 169 set-token  \ 16-color extension - n/a
-	['] default-font      0 16A set-token
-	['] set-font          0 16B set-token
-	['] char-height       0 16C set-token
-	['] char-width        0 16D set-token
-	['] >font             0 16E set-token
-	['] fontbytes         0 16F set-token
-
-	['] fb8-draw-character    0 180 set-token
-	['] fb8-reset-screen      0 181 set-token
-	['] fb8-toggle-cursor     0 182 set-token
-	['] fb8-erase-screen      0 183 set-token
-	['] fb8-blink-screen      0 184 set-token
-	['] fb8-invert-screen     0 185 set-token
-	['] fb8-insert-characters 0 186 set-token
-	['] fb8-delete-characters 0 187 set-token
-	['] fb8-insert-lines      0 188 set-token
-	['] fb8-delete-lines      0 189 set-token
-	['] fb8-draw-logo         0 18A set-token
-	['] fb8-install           0 18B set-token
-;
-fb8-set-tokens
-
 
 \ \\\\\\\\\\\\ Debug Stuff \\\\\\\\\\\\\\\\
 

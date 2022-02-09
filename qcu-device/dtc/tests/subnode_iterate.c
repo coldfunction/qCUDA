@@ -33,7 +33,7 @@
 
 static void test_node(void *fdt, int parent_offset)
 {
-	fdt32_t subnodes;
+	uint32_t subnodes;
 	const fdt32_t *prop;
 	int offset;
 	int count;
@@ -45,12 +45,10 @@ static void test_node(void *fdt, int parent_offset)
 		FAIL("Missing/invalid subnodes property at '%s'",
 		     fdt_get_name(fdt, parent_offset, NULL));
 	}
-	subnodes = cpu_to_fdt32(*prop);
+	subnodes = fdt32_to_cpu(*prop);
 
 	count = 0;
-	for (offset = fdt_first_subnode(fdt, parent_offset);
-	     offset >= 0;
-	     offset = fdt_next_subnode(fdt, offset))
+	fdt_for_each_subnode(offset, fdt, parent_offset)
 		count++;
 
 	if (count != subnodes) {
@@ -65,9 +63,7 @@ static void check_fdt_next_subnode(void *fdt)
 	int offset;
 	int count = 0;
 
-	for (offset = fdt_first_subnode(fdt, 0);
-	     offset >= 0;
-	     offset = fdt_next_subnode(fdt, offset)) {
+	fdt_for_each_subnode(offset, fdt, 0) {
 		test_node(fdt, offset);
 		count++;
 	}

@@ -1,7 +1,23 @@
 #ifndef _H_PCI
 #define _H_PCI
 
+enum {
+	CONFIGURATION_SPACE = 0,
+	IO_SPACE = 1,
+	MEMORY_SPACE_32 = 2,
+	MEMORY_SPACE_64 = 3,
+};
+
 typedef uint32_t pci_addr;
+
+typedef struct pci_range_t pci_range_t;
+
+struct pci_range_t {
+	unsigned int type;
+	unsigned long childaddr;
+	unsigned long parentaddr;
+	unsigned long len;
+};
 
 typedef struct pci_arch_t pci_arch_t;
 
@@ -18,8 +34,7 @@ struct pci_arch_t {
 	unsigned long mem_len;
 	unsigned long io_base;
 	unsigned long io_len;
-	unsigned long rbase;
-	unsigned long rlen;
+	pci_range_t host_ranges[4];
 	uint8_t irqs[4];
 };
 
@@ -187,12 +202,14 @@ extern const pci_arch_t *arch;
 #define PCI_DEVICE_ID_APPLE_UNI_N_I_PCI  0x001e
 #define PCI_DEVICE_ID_APPLE_UNI_N_PCI    0x001f
 #define PCI_DEVICE_ID_APPLE_UNI_N_AGP    0x0020
+#define PCI_DEVICE_ID_APPLE_UNI_N_GMAC   0x0021
 #define PCI_DEVICE_ID_APPLE_UNI_N_KEYL   0x0022
 #define PCI_DEVICE_ID_APPLE_KEYL_USB     0x003f
 #define PCI_DEVICE_ID_APPLE_U3_AGP       0x004b
 
 #define PCI_VENDOR_ID_SUN                0x108e
 #define PCI_DEVICE_ID_SUN_EBUS           0x1000
+#define PCI_DEVICE_ID_SUN_HME            0x1001
 #define PCI_DEVICE_ID_SUN_SIMBA          0x5000
 #define PCI_DEVICE_ID_SUN_PBM            0x8000
 #define PCI_DEVICE_ID_SUN_SABRE          0xa000
@@ -202,6 +219,7 @@ extern const pci_arch_t *arch;
 
 #define PCI_VENDOR_ID_REALTEK            0x10ec
 #define PCI_DEVICE_ID_REALTEK_RTL8029    0x8029
+#define PCI_DEVICE_ID_REALTEK_RTL8139    0x8139
 
 #define PCI_VENDOR_ID_QEMU               0x1234
 #define PCI_DEVICE_ID_QEMU_VGA           0x1111
@@ -212,6 +230,7 @@ extern const pci_arch_t *arch;
 
 #define PCI_VENDOR_ID_INTEL              0x8086
 #define PCI_DEVICE_ID_INTEL_82378        0x0484
+#define PCI_DEVICE_ID_INTEL_E1000        0x100e
 #define PCI_DEVICE_ID_INTEL_82441        0x1237
 
 #endif	/* _H_PCI */

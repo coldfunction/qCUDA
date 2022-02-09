@@ -15,9 +15,13 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA.
+ *
+ * You can also choose to distribute this program under the terms of
+ * the Unmodified Binary Distribution Licence (as given in the file
+ * COPYING.UBDL), provided that you have satisfied its requirements.
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <string.h>
 #include <stdlib.h>
@@ -41,7 +45,7 @@ FILE_LICENCE ( GPL2_OR_LATER );
 #define CERT( _index, _path )						\
 	extern char stored_cert_ ## _index ## _data[];			\
 	extern char stored_cert_ ## _index ## _len[];			\
-	__asm__ ( ".section \".rodata\", \"a\", @progbits\n\t"		\
+	__asm__ ( ".section \".rodata\", \"a\", " PROGBITS "\n\t"	\
 		  "\nstored_cert_" #_index "_data:\n\t"			\
 		  ".incbin \"" _path "\"\n\t"				\
 		  "\nstored_cert_" #_index "_end:\n\t"			\
@@ -142,6 +146,24 @@ void certstore_add ( struct x509_certificate *cert ) {
 }
 
 /**
+ * Remove certificate from store
+ *
+ * @v cert		X.509 certificate
+ */
+void certstore_del ( struct x509_certificate *cert ) {
+
+	/* Ignore attempts to remove permanent certificates */
+	if ( cert->flags & X509_FL_PERMANENT )
+		return;
+
+	/* Remove certificate from store */
+	DBGC ( &certstore, "CERTSTORE removed certificate %s\n",
+	       x509_name ( cert ) );
+	list_del ( &cert->store.list );
+	x509_put ( cert );
+}
+
+/**
  * Discard a stored certificate
  *
  * @ret discarded	Number of cached items discarded
@@ -153,14 +175,22 @@ static unsigned int certstore_discard ( void ) {
 	 * only reference is held by the store itself.
 	 */
 	list_for_each_entry_reverse ( cert, &certstore.links, store.list ) {
-		if ( cert->refcnt.count == 0 ) {
-			DBGC ( &certstore, "CERTSTORE discarded certificate "
-			       "%s\n", x509_name ( cert ) );
-			list_del ( &cert->store.list );
-			x509_put ( cert );
-			return 1;
-		}
+
+		/* Skip certificates for which another reference is held */
+		if ( cert->refcnt.count > 0 )
+			continue;
+
+		/* Skip certificates that were added at build time or
+		 * added explicitly at run time.
+		 */
+		if ( cert->flags & ( X509_FL_PERMANENT | X509_FL_EXPLICIT ) )
+			continue;
+
+		/* Discard certificate */
+		certstore_del ( cert );
+		return 1;
 	}
+
 	return 0;
 }
 
@@ -210,6 +240,7 @@ static void certstore_init ( void ) {
 		 * permanent reference to it.
 		 */
 		certstore_add ( cert );
+		cert->flags |= X509_FL_PERMANENT;
 		DBGC ( &certstore, "CERTSTORE permanent certificate %d is %s\n",
 		       i, x509_name ( cert ) );
 	}

@@ -15,9 +15,13 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA.
+ *
+ * You can also choose to distribute this program under the terms of
+ * the Unmodified Binary Distribution Licence (as given in the file
+ * COPYING.UBDL), provided that you have satisfied its requirements.
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 /** @file
  *
@@ -106,7 +110,7 @@ static void ocsp_prepare_test ( struct ocsp_test *test ) {
 	x509_invalidate ( cert );
 
 	/* Force-validate issuer certificate */
-	issuer->valid = 1;
+	issuer->flags |= X509_FL_VALIDATED;
 	issuer->path_remaining = ( issuer->extensions.basic.path_len + 1 );
 }
 
@@ -1857,5 +1861,6 @@ struct self_test ocsp_test __self_test = {
 };
 
 /* Drag in algorithms required for tests */
+REQUIRING_SYMBOL ( ocsp_test );
 REQUIRE_OBJECT ( rsa );
 REQUIRE_OBJECT ( sha1 );

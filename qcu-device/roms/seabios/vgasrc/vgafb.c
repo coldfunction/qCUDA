@@ -10,8 +10,10 @@
 #include "output.h" // dprintf
 #include "stdvga.h" // stdvga_planar4_plane
 #include "string.h" // memset_far
-#include "vgabios.h" // vgafb_scroll
+#include "vgabios.h" // get_current_mode
+#include "vgafb.h" // vgafb_write_char
 #include "vgahw.h" // vgahw_get_linelength
+#include "vgautil.h" // VBE_framebuffer
 
 static inline void
 memmove_stride(u16 seg, void *dst, void *src, int copylen, int stride, int lines)
@@ -273,28 +275,22 @@ gfx_direct(struct gfx_op *op)
     int bypp = DIV_ROUND_UP(depth, 8);
     void *dest_far = (fb + op->displaystart + op->y * op->linelength
                       + op->x * bypp);
+    u8 data[64];
+    int i;
     switch (op->op) {
     default:
-    case GO_READ8: {
-        u8 data[64];
+    case GO_READ8:
         memcpy_high(MAKE_FLATPTR(GET_SEG(SS), data), dest_far, bypp * 8);
-        int i;
         for (i=0; i<8; i++)
             op->pixels[i] = reverse_color(depth, *(u32*)&data[i*bypp]);
         break;
-    }
-    case GO_WRITE8: {
-        u8 data[64];
-        int i;
+    case GO_WRITE8:
         for (i=0; i<8; i++)
             *(u32*)&data[i*bypp] = get_color(depth, op->pixels[i]);
         memcpy_high(dest_far, MAKE_FLATPTR(GET_SEG(SS), data), bypp * 8);
         break;
-    }
-    case GO_MEMSET: {
+    case GO_MEMSET: ;
         u32 color = get_color(depth, op->pixels[0]);
-        u8 data[64];
-        int i;
         for (i=0; i<8; i++)
             *(u32*)&data[i*bypp] = color;
         memcpy_high(dest_far, MAKE_FLATPTR(GET_SEG(SS), data), bypp * 8);
@@ -303,7 +299,6 @@ gfx_direct(struct gfx_op *op)
             memcpy_high(dest_far + op->linelength * i
                         , dest_far, op->xlen * bypp);
         break;
-    }
     case GO_MEMMOVE: ;
         void *src_far = (fb + op->displaystart + op->srcy * op->linelength
                          + op->x * bypp);
@@ -353,7 +348,7 @@ handle_gfx_op(struct gfx_op *op)
 // Move characters when in graphics mode.
 static void
 gfx_move_chars(struct vgamode_s *vmode_g, struct cursorpos dest
-               , struct cursorpos src, struct cursorpos movesize)
+               , struct cursorpos movesize, int lines)
 {
     struct gfx_op op;
     init_gfx_op(&op, vmode_g);
@@ -362,23 +357,23 @@ gfx_move_chars(struct vgamode_s *vmode_g, struct cursorpos dest
     int cheight = GET_BDA(char_height);
     op.y = dest.y * cheight;
     op.ylen = movesize.y * cheight;
-    op.srcy = src.y * cheight;
+    op.srcy = op.y + lines * cheight;
     op.op = GO_MEMMOVE;
     handle_gfx_op(&op);
 }
 
 // Clear area of screen in graphics mode.
 static void
-gfx_clear_chars(struct vgamode_s *vmode_g, struct cursorpos dest
-                , struct carattr ca, struct cursorpos clearsize)
+gfx_clear_chars(struct vgamode_s *vmode_g, struct cursorpos win
+                , struct cursorpos winsize, struct carattr ca)
 {
     struct gfx_op op;
     init_gfx_op(&op, vmode_g);
-    op.x = dest.x * 8;
-    op.xlen = clearsize.x * 8;
+    op.x = win.x * 8;
+    op.xlen = winsize.x * 8;
     int cheight = GET_BDA(char_height);
-    op.y = dest.y * cheight;
-    op.ylen = clearsize.y * cheight;
+    op.y = win.y * cheight;
+    op.ylen = winsize.y * cheight;
     op.pixels[0] = ca.attr;
     if (vga_emulate_text())
         op.pixels[0] = ca.attr >> 4;
@@ -504,30 +499,6 @@ fail:
     return (struct carattr){0, 0, 0};
 }
 
-// Draw/undraw a cursor on the framebuffer by xor'ing the cursor cell
-void
-gfx_set_swcursor(struct vgamode_s *vmode_g, int enable, struct cursorpos cp)
-{
-    u16 cursor_type = get_cursor_shape();
-    u8 start = cursor_type >> 8, end = cursor_type & 0xff;
-    struct gfx_op op;
-    init_gfx_op(&op, vmode_g);
-    op.x = cp.x * 8;
-    int cheight = GET_BDA(char_height);
-    op.y = cp.y * cheight + start;
-
-    int i;
-    for (i = start; i < cheight && i <= end; i++, op.y++) {
-        op.op = GO_READ8;
-        handle_gfx_op(&op);
-        int j;
-        for (j = 0; j < 8; j++)
-            op.pixels[j] ^= 0x07;
-        op.op = GO_WRITE8;
-        handle_gfx_op(&op);
-    }
-}
-
 // Set the pixel at the given position.
 void
 vgafb_write_pixel(u8 color, u16 x, u16 y)
@@ -535,7 +506,6 @@ vgafb_write_pixel(u8 color, u16 x, u16 y)
     struct vgamode_s *vmode_g = get_current_mode();
     if (!vmode_g)
         return;
-    vgafb_set_swcursor(0);
 
     struct gfx_op op;
     init_gfx_op(&op, vmode_g);
@@ -560,7 +530,6 @@ vgafb_read_pixel(u16 x, u16 y)
     struct vgamode_s *vmode_g = get_current_mode();
     if (!vmode_g)
         return 0;
-    vgafb_set_swcursor(0);
 
     struct gfx_op op;
     init_gfx_op(&op, vmode_g);
@@ -587,45 +556,70 @@ text_address(struct cursorpos cp)
 }
 
 // Move characters on screen.
-void
-vgafb_move_chars(struct cursorpos dest
-                 , struct cursorpos src, struct cursorpos movesize)
+static void
+vgafb_move_chars(struct cursorpos dest, struct cursorpos movesize, int lines)
 {
     struct vgamode_s *vmode_g = get_current_mode();
     if (!vmode_g)
         return;
-    vgafb_set_swcursor(0);
 
     if (GET_GLOBAL(vmode_g->memmodel) != MM_TEXT) {
-        gfx_move_chars(vmode_g, dest, src, movesize);
+        gfx_move_chars(vmode_g, dest, movesize, lines);
         return;
     }
 
     int stride = GET_BDA(video_cols) * 2;
-    memmove_stride(GET_GLOBAL(vmode_g->sstart)
-                   , text_address(dest), text_address(src)
+    void *dest_addr = text_address(dest), *src_addr = dest_addr + lines * stride;
+    memmove_stride(GET_GLOBAL(vmode_g->sstart), dest_addr, src_addr
                    , movesize.x * 2, stride, movesize.y);
 }
 
 // Clear area of screen.
-void
-vgafb_clear_chars(struct cursorpos dest
-                  , struct carattr ca, struct cursorpos clearsize)
+static void
+vgafb_clear_chars(struct cursorpos win, struct cursorpos winsize
+                  , struct carattr ca)
 {
     struct vgamode_s *vmode_g = get_current_mode();
     if (!vmode_g)
         return;
-    vgafb_set_swcursor(0);
 
     if (GET_GLOBAL(vmode_g->memmodel) != MM_TEXT) {
-        gfx_clear_chars(vmode_g, dest, ca, clearsize);
+        gfx_clear_chars(vmode_g, win, winsize, ca);
         return;
     }
 
     int stride = GET_BDA(video_cols) * 2;
     u16 attr = ((ca.use_attr ? ca.attr : 0x07) << 8) | ca.car;
-    memset16_stride(GET_GLOBAL(vmode_g->sstart), text_address(dest), attr
-                    , clearsize.x * 2, stride, clearsize.y);
+    memset16_stride(GET_GLOBAL(vmode_g->sstart), text_address(win), attr
+                    , winsize.x * 2, stride, winsize.y);
+}
+
+// Scroll characters within a window on the screen
+void
+vgafb_scroll(struct cursorpos win, struct cursorpos winsize
+             , int lines, struct carattr ca)
+{
+    if (!lines) {
+        // Clear window
+        vgafb_clear_chars(win, winsize, ca);
+    } else if (lines > 0) {
+        // Scroll the window up (eg, from page down key)
+        winsize.y -= lines;
+        vgafb_move_chars(win, winsize, lines);
+
+        win.y += winsize.y;
+        winsize.y = lines;
+        vgafb_clear_chars(win, winsize, ca);
+    } else {
+        // Scroll the window down (eg, from page up key)
+        win.y -= lines;
+        winsize.y += lines;
+        vgafb_move_chars(win, winsize, lines);
+
+        win.y += lines;
+        winsize.y = -lines;
+        vgafb_clear_chars(win, winsize, ca);
+    }
 }
 
 // Write a character to the screen.
@@ -635,7 +629,6 @@ vgafb_write_char(struct cursorpos cp, struct carattr ca)
     struct vgamode_s *vmode_g = get_current_mode();
     if (!vmode_g)
         return;
-    vgafb_set_swcursor(0);
 
     if (GET_GLOBAL(vmode_g->memmodel) != MM_TEXT) {
         gfx_write_char(vmode_g, cp, ca);
@@ -658,7 +651,6 @@ vgafb_read_char(struct cursorpos cp)
     struct vgamode_s *vmode_g = get_current_mode();
     if (!vmode_g)
         return (struct carattr){0, 0, 0};
-    vgafb_set_swcursor(0);
 
     if (GET_GLOBAL(vmode_g->memmodel) != MM_TEXT)
         return gfx_read_char(vmode_g, cp);
@@ -666,37 +658,4 @@ vgafb_read_char(struct cursorpos cp)
     u16 *dest_far = text_address(cp);
     u16 v = GET_FARVAR(GET_GLOBAL(vmode_g->sstart), *dest_far);
     return (struct carattr){v, v>>8, 0};
-}
-
-// Draw/undraw a cursor on the screen
-void
-vgafb_set_swcursor(int enable)
-{
-    if (!vga_emulate_text())
-        return;
-    u8 flags = GET_BDA_EXT(flags);
-    if (!!(flags & BF_SWCURSOR) == enable)
-        // Already in requested mode.
-        return;
-    struct vgamode_s *vmode_g = get_current_mode();
-    if (!vmode_g)
-        return;
-    struct cursorpos cp = get_cursor_pos(0xff);
-    if (cp.x >= GET_BDA(video_cols) || cp.y > GET_BDA(video_rows)
-        || GET_BDA(cursor_type) >= 0x2000)
-        // Cursor not visible
-        return;
-
-    SET_BDA_EXT(flags, (flags & ~BF_SWCURSOR) | (enable ? BF_SWCURSOR : 0));
-
-    if (GET_GLOBAL(vmode_g->memmodel) != MM_TEXT) {
-        gfx_set_swcursor(vmode_g, enable, cp);
-        return;
-    }
-
-    // In text mode, swap foreground and background attributes for cursor
-    void *dest_far = text_address(cp) + 1;
-    u8 attr = GET_FARVAR(GET_GLOBAL(vmode_g->sstart), *(u8*)dest_far);
-    attr = (attr >> 4) | (attr << 4);
-    SET_FARVAR(GET_GLOBAL(vmode_g->sstart), *(u8*)dest_far, attr);
 }

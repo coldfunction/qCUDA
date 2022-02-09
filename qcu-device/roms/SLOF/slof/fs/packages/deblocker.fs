@@ -68,3 +68,24 @@ INSTANCE VARIABLE fail-count
   my-block @ adr @ len @ move THEN
 
   r> ;
+
+: write-blocks ( addr block# #blocks -- #writtenblks )
+    s" write-blocks" $call-parent
+;
+
+: write ( addr len -- actual )
+    dup block-size @ mod IF
+        ." ERROR: Can not write partial sector length." cr
+        2drop 0 EXIT
+    THEN
+    block-size @ /                             ( addr #blocks )
+    offset @                                   ( addr #blocks offset )
+    dup block-size @ mod IF
+        ." ERROR: Can not write at partial sector offset." cr
+        3drop 0 EXIT
+    THEN
+    block-size @ / swap                        ( addr block# #blocks )
+    write-blocks                               ( #writtenblks )
+    block-size @ *
+    dup offset +!
+;

@@ -34,7 +34,7 @@ extern cell the_mem[];   /* Space for the dictionary / the HERE pointer */
 extern cell *restrict dp;
 extern cell *restrict rp;
 
-void client_entry_point();
+void client_entry_point(void);
 
 extern unsigned long call_client(cell);
 extern long c_romfs_lookup(long, long, void *);

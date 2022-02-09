@@ -13,21 +13,30 @@
  * GNU GPL, version 2 or (at your option) any later version.
  */
 
-#include "qemu-common.h"
+#include "qemu/osdep.h"
+#include "qemu-version.h"
+#include "qemu/cutils.h"
+#include "qemu/option.h"
 #include "monitor/monitor.h"
 #include "sysemu/sysemu.h"
-#include "qmp-commands.h"
-#include "sysemu/char.h"
+#include "qemu/config-file.h"
+#include "qemu/uuid.h"
+#include "chardev/char.h"
 #include "ui/qemu-spice.h"
 #include "ui/vnc.h"
 #include "sysemu/kvm.h"
 #include "sysemu/arch_init.h"
 #include "hw/qdev.h"
 #include "sysemu/blockdev.h"
+#include "sysemu/block-backend.h"
 #include "qom/qom-qobject.h"
+#include "qapi/error.h"
+#include "qapi/qapi-commands-block-core.h"
+#include "qapi/qapi-commands-misc.h"
+#include "qapi/qapi-commands-ui.h"
+#include "qapi/qmp/qdict.h"
 #include "qapi/qmp/qerror.h"
-#include "qapi/qmp/qobject.h"
-#include "qapi/qmp-input-visitor.h"
+#include "qapi/qobject-input-visitor.h"
 #include "hw/boards.h"
 #include "qom/object_interfaces.h"
 #include "hw/mem/pc-dimm.h"
@@ -48,15 +57,11 @@ NameInfo *qmp_query_name(Error **errp)
 VersionInfo *qmp_query_version(Error **errp)
 {
     VersionInfo *info = g_new0(VersionInfo, 1);
-    const char *version = QEMU_VERSION;
-    char *tmp;
 
     info->qemu = g_new0(VersionTriple, 1);
-    info->qemu->major = strtol(version, &tmp, 10);
-    tmp++;
-    info->qemu->minor = strtol(tmp, &tmp, 10);
-    tmp++;
-    info->qemu->micro = strtol(tmp, &tmp, 10);
+    info->qemu->major = QEMU_VERSION_MAJOR;
+    info->qemu->minor = QEMU_VERSION_MINOR;
+    info->qemu->micro = QEMU_VERSION_MICRO;
     info->package = g_strdup(QEMU_PKGVERSION);
 
     return info;
@@ -75,26 +80,26 @@ KvmInfo *qmp_query_kvm(Error **errp)
 UuidInfo *qmp_query_uuid(Error **errp)
 {
     UuidInfo *info = g_malloc0(sizeof(*info));
-    char uuid[64];
 
-    snprintf(uuid, sizeof(uuid), UUID_FMT, qemu_uuid[0], qemu_uuid[1],
-                   qemu_uuid[2], qemu_uuid[3], qemu_uuid[4], qemu_uuid[5],
-                   qemu_uuid[6], qemu_uuid[7], qemu_uuid[8], qemu_uuid[9],
-                   qemu_uuid[10], qemu_uuid[11], qemu_uuid[12], qemu_uuid[13],
-                   qemu_uuid[14], qemu_uuid[15]);
-
-    info->UUID = g_strdup(uuid);
+    info->UUID = qemu_uuid_unparse_strdup(&qemu_uuid);
     return info;
 }
 
 void qmp_quit(Error **errp)
 {
     no_shutdown = 0;
-    qemu_system_shutdown_request();
+    qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_QMP);
 }
 
 void qmp_stop(Error **errp)
 {
+    /* if there is a dump in background, we should wait until the dump
+     * finished */
+    if (dump_in_progress()) {
+        error_setg(errp, "There is a dump in process, please wait.");
+        return;
+    }
+
     if (runstate_check(RUN_STATE_INMIGRATE)) {
         autostart = 0;
     } else {
@@ -104,17 +109,12 @@ void qmp_stop(Error **errp)
 
 void qmp_system_reset(Error **errp)
 {
-    qemu_system_reset_request();
+    qemu_system_reset_request(SHUTDOWN_CAUSE_HOST_QMP);
 }
 
 void qmp_system_powerdown(Error **erp)
 {
     qemu_system_powerdown_request();
-}
-
-void qmp_cpu(int64_t index, Error **errp)
-{
-    /* Just do nothing */
 }
 
 void qmp_cpu_add(int64_t id, Error **errp)
@@ -147,13 +147,13 @@ VncInfo2List *qmp_query_vnc_servers(Error **errp)
 
 #ifndef CONFIG_SPICE
 /*
- * qmp-commands.hx ensures that QMP command query-spice exists only
- * #ifdef CONFIG_SPICE.  Necessary for an accurate query-commands
- * result.  However, the QAPI schema is blissfully unaware of that,
- * and the QAPI code generator happily generates a dead
- * qmp_marshal_input_query_spice() that calls qmp_query_spice().
- * Provide it one, or else linking fails.
- * FIXME Educate the QAPI schema on CONFIG_SPICE.
+ * qmp_unregister_commands_hack() ensures that QMP command query-spice
+ * exists only #ifdef CONFIG_SPICE.  Necessary for an accurate
+ * query-commands result.  However, the QAPI schema is blissfully
+ * unaware of that, and the QAPI code generator happily generates a
+ * dead qmp_marshal_query_spice() that calls qmp_query_spice().
+ * Provide it one, or else linking fails.  FIXME Educate the QAPI
+ * schema on CONFIG_SPICE.
  */
 SpiceInfo *qmp_query_spice(Error **errp)
 {
@@ -163,8 +163,15 @@ SpiceInfo *qmp_query_spice(Error **errp)
 
 void qmp_cont(Error **errp)
 {
+    BlockBackend *blk;
     Error *local_err = NULL;
-    BlockDriverState *bs;
+
+    /* if there is a dump in background, we should wait until the dump
+     * finished */
+    if (dump_in_progress()) {
+        error_setg(errp, "There is a dump in process, please wait.");
+        return;
+    }
 
     if (runstate_needs_reset()) {
         error_setg(errp, "Resetting the Virtual Machine is required");
@@ -173,15 +180,20 @@ void qmp_cont(Error **errp)
         return;
     }
 
-    for (bs = bdrv_next(NULL); bs; bs = bdrv_next(bs)) {
-        bdrv_iostatus_reset(bs);
+    for (blk = blk_next(NULL); blk; blk = blk_next(blk)) {
+        blk_iostatus_reset(blk);
     }
-    for (bs = bdrv_next(NULL); bs; bs = bdrv_next(bs)) {
-        bdrv_add_key(bs, NULL, &local_err);
-        if (local_err) {
-            error_propagate(errp, local_err);
-            return;
-        }
+
+    /* Continuing after completed migration. Images have been inactivated to
+     * allow the destination to take control. Need to get control back now.
+     *
+     * If there are no inactive block nodes (e.g. because the VM was just
+     * paused rather than completing a migration), bdrv_inactivate_all() simply
+     * doesn't do anything. */
+    bdrv_invalidate_cache_all(&local_err);
+    if (local_err) {
+        error_propagate(errp, local_err);
+        return;
     }
 
     if (runstate_check(RUN_STATE_INMIGRATE)) {
@@ -202,6 +214,7 @@ ObjectPropertyInfoList *qmp_qom_list(const char *path, Error **errp)
     bool ambiguous = false;
     ObjectPropertyInfoList *props = NULL;
     ObjectProperty *prop;
+    ObjectPropertyIterator iter;
 
     obj = object_resolve_path(path, &ambiguous);
     if (obj == NULL) {
@@ -214,7 +227,8 @@ ObjectPropertyInfoList *qmp_qom_list(const char *path, Error **errp)
         return NULL;
     }
 
-    QTAILQ_FOREACH(prop, &obj->properties, node) {
+    object_property_iter_init(&iter, obj);
+    while ((prop = object_property_iter_next(&iter))) {
         ObjectPropertyInfoList *entry = g_malloc0(sizeof(*entry));
 
         entry->value = g_malloc0(sizeof(ObjectPropertyInfo));
@@ -228,12 +242,9 @@ ObjectPropertyInfoList *qmp_qom_list(const char *path, Error **errp)
     return props;
 }
 
-/* FIXME: teach qapi about how to pass through Visitors */
-void qmp_qom_set(QDict *qdict, QObject **ret, Error **errp)
+void qmp_qom_set(const char *path, const char *property, QObject *value,
+                 Error **errp)
 {
-    const char *path = qdict_get_str(qdict, "path");
-    const char *property = qdict_get_str(qdict, "property");
-    QObject *value = qdict_get(qdict, "value");
     Object *obj;
 
     obj = object_resolve_path(path, NULL);
@@ -246,20 +257,18 @@ void qmp_qom_set(QDict *qdict, QObject **ret, Error **errp)
     object_property_set_qobject(obj, value, property, errp);
 }
 
-void qmp_qom_get(QDict *qdict, QObject **ret, Error **errp)
+QObject *qmp_qom_get(const char *path, const char *property, Error **errp)
 {
-    const char *path = qdict_get_str(qdict, "path");
-    const char *property = qdict_get_str(qdict, "property");
     Object *obj;
 
     obj = object_resolve_path(path, NULL);
     if (!obj) {
         error_set(errp, ERROR_CLASS_DEVICE_NOT_FOUND,
                   "Device '%s' not found", path);
-        return;
+        return NULL;
     }
 
-    *ret = object_property_get_qobject(obj, property, errp);
+    return object_property_get_qobject(obj, property, errp);
 }
 
 void qmp_set_password(const char *protocol, const char *password,
@@ -411,7 +420,8 @@ void qmp_change(const char *device, const char *target,
     if (strcmp(device, "vnc") == 0) {
         qmp_change_vnc(target, has_arg, arg, errp);
     } else {
-        qmp_change_blockdev(device, target, arg, errp);
+        qmp_blockdev_change_medium(true, device, false, NULL, target,
+                                   has_arg, arg, false, 0, errp);
     }
 }
 
@@ -419,9 +429,15 @@ static void qom_list_types_tramp(ObjectClass *klass, void *data)
 {
     ObjectTypeInfoList *e, **pret = data;
     ObjectTypeInfo *info;
+    ObjectClass *parent = object_class_get_parent(klass);
 
     info = g_malloc0(sizeof(*info));
     info->name = g_strdup(object_class_get_name(klass));
+    info->has_abstract = info->abstract = object_class_is_abstract(klass);
+    if (parent) {
+        info->has_parent = true;
+        info->parent = g_strdup(object_class_get_name(parent));
+    }
 
     e = g_malloc0(sizeof(*e));
     e->value = info;
@@ -449,12 +465,12 @@ ObjectTypeInfoList *qmp_qom_list_types(bool has_implements,
  *
  * The caller must free the return value.
  */
-static DevicePropertyInfo *make_device_property_info(ObjectClass *klass,
-                                                     const char *name,
-                                                     const char *default_type,
-                                                     const char *description)
+static ObjectPropertyInfo *make_device_property_info(ObjectClass *klass,
+                                                  const char *name,
+                                                  const char *default_type,
+                                                  const char *description)
 {
-    DevicePropertyInfo *info;
+    ObjectPropertyInfo *info;
     Property *prop;
 
     do {
@@ -469,13 +485,14 @@ static DevicePropertyInfo *make_device_property_info(ObjectClass *klass,
              * for removal.  This conditional should be removed along with
              * it.
              */
-            if (!prop->info->set) {
+            if (!prop->info->set && !prop->info->create) {
                 return NULL;           /* no way to set it, don't show */
             }
 
             info = g_malloc0(sizeof(*info));
             info->name = g_strdup(prop->name);
-            info->type = g_strdup(prop->info->name);
+            info->type = default_type ? g_strdup(default_type)
+                                      : g_strdup(prop->info->name);
             info->has_description = !!prop->info->description;
             info->description = g_strdup(prop->info->description);
             return info;
@@ -493,13 +510,14 @@ static DevicePropertyInfo *make_device_property_info(ObjectClass *klass,
     return info;
 }
 
-DevicePropertyInfoList *qmp_device_list_properties(const char *typename,
-                                                   Error **errp)
+ObjectPropertyInfoList *qmp_device_list_properties(const char *typename,
+                                                Error **errp)
 {
     ObjectClass *klass;
     Object *obj;
     ObjectProperty *prop;
-    DevicePropertyInfoList *prop_list = NULL;
+    ObjectPropertyIterator iter;
+    ObjectPropertyInfoList *prop_list = NULL;
 
     klass = object_class_by_name(typename);
     if (klass == NULL) {
@@ -510,15 +528,22 @@ DevicePropertyInfoList *qmp_device_list_properties(const char *typename,
 
     klass = object_class_dynamic_cast(klass, TYPE_DEVICE);
     if (klass == NULL) {
-        error_setg(errp, QERR_INVALID_PARAMETER_VALUE, "name", TYPE_DEVICE);
+        error_setg(errp, QERR_INVALID_PARAMETER_VALUE, "typename", TYPE_DEVICE);
+        return NULL;
+    }
+
+    if (object_class_is_abstract(klass)) {
+        error_setg(errp, QERR_INVALID_PARAMETER_VALUE, "typename",
+                   "non-abstract device type");
         return NULL;
     }
 
     obj = object_new(typename);
 
-    QTAILQ_FOREACH(prop, &obj->properties, node) {
-        DevicePropertyInfo *info;
-        DevicePropertyInfoList *entry;
+    object_property_iter_init(&iter, obj);
+    while ((prop = object_property_iter_next(&iter))) {
+        ObjectPropertyInfo *info;
+        ObjectPropertyInfoList *entry;
 
         /* Skip Object and DeviceState properties */
         if (strcmp(prop->name, "type") == 0 ||
@@ -553,16 +578,86 @@ DevicePropertyInfoList *qmp_device_list_properties(const char *typename,
     return prop_list;
 }
 
+ObjectPropertyInfoList *qmp_qom_list_properties(const char *typename,
+                                             Error **errp)
+{
+    ObjectClass *klass;
+    Object *obj = NULL;
+    ObjectProperty *prop;
+    ObjectPropertyIterator iter;
+    ObjectPropertyInfoList *prop_list = NULL;
+
+    klass = object_class_by_name(typename);
+    if (klass == NULL) {
+        error_set(errp, ERROR_CLASS_DEVICE_NOT_FOUND,
+                  "Class '%s' not found", typename);
+        return NULL;
+    }
+
+    klass = object_class_dynamic_cast(klass, TYPE_OBJECT);
+    if (klass == NULL) {
+        error_setg(errp, QERR_INVALID_PARAMETER_VALUE, "typename", TYPE_OBJECT);
+        return NULL;
+    }
+
+    if (object_class_is_abstract(klass)) {
+        object_class_property_iter_init(&iter, klass);
+    } else {
+        obj = object_new(typename);
+        object_property_iter_init(&iter, obj);
+    }
+    while ((prop = object_property_iter_next(&iter))) {
+        ObjectPropertyInfo *info;
+        ObjectPropertyInfoList *entry;
+
+        info = g_malloc0(sizeof(*info));
+        info->name = g_strdup(prop->name);
+        info->type = g_strdup(prop->type);
+        info->has_description = !!prop->description;
+        info->description = g_strdup(prop->description);
+
+        entry = g_malloc0(sizeof(*entry));
+        entry->value = info;
+        entry->next = prop_list;
+        prop_list = entry;
+    }
+
+    object_unref(obj);
+
+    return prop_list;
+}
+
 CpuDefinitionInfoList *qmp_query_cpu_definitions(Error **errp)
 {
     return arch_query_cpu_definitions(errp);
+}
+
+CpuModelExpansionInfo *qmp_query_cpu_model_expansion(CpuModelExpansionType type,
+                                                     CpuModelInfo *model,
+                                                     Error **errp)
+{
+    return arch_query_cpu_model_expansion(type, model, errp);
+}
+
+CpuModelCompareInfo *qmp_query_cpu_model_comparison(CpuModelInfo *modela,
+                                                    CpuModelInfo *modelb,
+                                                    Error **errp)
+{
+    return arch_query_cpu_model_comparison(modela, modelb, errp);
+}
+
+CpuModelBaselineInfo *qmp_query_cpu_model_baseline(CpuModelInfo *modela,
+                                                   CpuModelInfo *modelb,
+                                                   Error **errp)
+{
+    return arch_query_cpu_model_baseline(modela, modelb, errp);
 }
 
 void qmp_add_client(const char *protocol, const char *fdname,
                     bool has_skipauth, bool skipauth, bool has_tls, bool tls,
                     Error **errp)
 {
-    CharDriverState *s;
+    Chardev *s;
     int fd;
 
     fd = monitor_get_fd(cur_mon, fdname, errp);
@@ -601,108 +696,42 @@ void qmp_add_client(const char *protocol, const char *fdname,
     close(fd);
 }
 
-void object_add(const char *type, const char *id, const QDict *qdict,
-                Visitor *v, Error **errp)
+
+void qmp_object_add(const char *type, const char *id,
+                    bool has_props, QObject *props, Error **errp)
 {
+    QDict *pdict;
+    Visitor *v;
     Object *obj;
-    ObjectClass *klass;
-    const QDictEntry *e;
-    Error *local_err = NULL;
-
-    klass = object_class_by_name(type);
-    if (!klass) {
-        error_setg(errp, "invalid object type: %s", type);
-        return;
-    }
-
-    if (!object_class_dynamic_cast(klass, TYPE_USER_CREATABLE)) {
-        error_setg(errp, "object type '%s' isn't supported by object-add",
-                   type);
-        return;
-    }
-
-    if (object_class_is_abstract(klass)) {
-        error_setg(errp, "object type '%s' is abstract", type);
-        return;
-    }
-
-    obj = object_new(type);
-    if (qdict) {
-        for (e = qdict_first(qdict); e; e = qdict_next(qdict, e)) {
-            object_property_set(obj, v, e->key, &local_err);
-            if (local_err) {
-                goto out;
-            }
-        }
-    }
-
-    object_property_add_child(object_get_objects_root(),
-                              id, obj, &local_err);
-    if (local_err) {
-        goto out;
-    }
-
-    user_creatable_complete(obj, &local_err);
-    if (local_err) {
-        object_property_del(object_get_objects_root(),
-                            id, &error_abort);
-        goto out;
-    }
-out:
-    if (local_err) {
-        error_propagate(errp, local_err);
-    }
-    object_unref(obj);
-}
-
-void qmp_object_add(QDict *qdict, QObject **ret, Error **errp)
-{
-    const char *type = qdict_get_str(qdict, "qom-type");
-    const char *id = qdict_get_str(qdict, "id");
-    QObject *props = qdict_get(qdict, "props");
-    const QDict *pdict = NULL;
-    QmpInputVisitor *qiv;
 
     if (props) {
-        pdict = qobject_to_qdict(props);
+        pdict = qobject_to(QDict, props);
         if (!pdict) {
             error_setg(errp, QERR_INVALID_PARAMETER_TYPE, "props", "dict");
             return;
         }
+        QINCREF(pdict);
+    } else {
+        pdict = qdict_new();
     }
 
-    qiv = qmp_input_visitor_new(props);
-    object_add(type, id, pdict, qmp_input_get_visitor(qiv), errp);
-    qmp_input_visitor_cleanup(qiv);
+    v = qobject_input_visitor_new(QOBJECT(pdict));
+    obj = user_creatable_add_type(type, id, pdict, v, errp);
+    visit_free(v);
+    if (obj) {
+        object_unref(obj);
+    }
+    QDECREF(pdict);
 }
 
 void qmp_object_del(const char *id, Error **errp)
 {
-    Object *container;
-    Object *obj;
-
-    container = object_get_objects_root();
-    obj = object_resolve_path_component(container, id);
-    if (!obj) {
-        error_setg(errp, "object id not found");
-        return;
-    }
-
-    if (!user_creatable_can_be_deleted(USER_CREATABLE(obj), errp)) {
-        error_setg(errp, "%s is in use, can not be deleted", id);
-        return;
-    }
-    object_unparent(obj);
+    user_creatable_del(id, errp);
 }
 
 MemoryDeviceInfoList *qmp_query_memory_devices(Error **errp)
 {
-    MemoryDeviceInfoList *head = NULL;
-    MemoryDeviceInfoList **prev = &head;
-
-    qmp_pc_dimm_device_list(qdev_get_machine(), &prev);
-
-    return head;
+    return qmp_pc_dimm_device_list();
 }
 
 ACPIOSTInfoList *qmp_query_acpi_ospm_status(Error **errp)
@@ -722,4 +751,33 @@ ACPIOSTInfoList *qmp_query_acpi_ospm_status(Error **errp)
     }
 
     return head;
+}
+
+MemoryInfo *qmp_query_memory_size_summary(Error **errp)
+{
+    MemoryInfo *mem_info = g_malloc0(sizeof(MemoryInfo));
+
+    mem_info->base_memory = ram_size;
+
+    mem_info->plugged_memory = get_plugged_memory_size();
+    mem_info->has_plugged_memory =
+        mem_info->plugged_memory != (uint64_t)-1;
+
+    return mem_info;
+}
+
+static QemuSemaphore x_oob_test_sem;
+
+static void __attribute__((constructor)) x_oob_test_init(void)
+{
+    qemu_sem_init(&x_oob_test_sem, 0);
+}
+
+void qmp_x_oob_test(bool lock, Error **errp)
+{
+    if (lock) {
+        qemu_sem_wait(&x_oob_test_sem);
+    } else {
+        qemu_sem_post(&x_oob_test_sem);
+    }
 }

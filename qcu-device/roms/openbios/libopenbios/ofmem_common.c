@@ -350,7 +350,7 @@ static void ofmem_update_translations( void )
 	ofmem_update_memory_available(s_phandle_memory, ofmem->phys_range, 
 			&phys_range_prop, &phys_range_prop_size, &phys_range_prop_used, get_ram_size() - 1);
 	ofmem_update_memory_available(s_phandle_mmu, ofmem->virt_range, 
-			&virt_range_prop, &virt_range_prop_size, &virt_range_prop_used, (ucell)-1);
+			&virt_range_prop, &virt_range_prop_size, &virt_range_prop_used, ofmem_arch_get_virt_top() - 1);
 	ofmem_update_mmu_translations();
 }
 
@@ -623,7 +623,7 @@ ucell ofmem_claim( ucell addr, ucell size, ucell align )
 	virt = phys = 0;
 	if( !align ) {
 		if( is_free(addr, size, ofmem->virt_range) &&
-		    is_free(addr, size, ofmem->phys_range) ) {
+		    is_free(addr, size, ofmem->phys_range) && addr < get_ram_size() ) {
 			ofmem_claim_phys_( addr, size, 0, 0, 0, 0 );
 			ofmem_claim_virt_( addr, size, 0, 0, 0, 0 );
 			virt = phys = addr;

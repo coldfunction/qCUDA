@@ -295,6 +295,10 @@ TABLE-EXECUTE handle-CSI
 0 , 0 , 0 , 0 ,
 0 , 0 , 0 , 0 ,
 
+: handle-CSI-key
+    key 1f and handle-CSI
+;
+
 TABLE-EXECUTE handle-meta
 0 , 0 , 0 , 0 ,
 0 , 0 , 0 , 0 ,
@@ -302,7 +306,7 @@ TABLE-EXECUTE handle-meta
 0 , 0 , 0 , ' handle-fn ,
 0 , 0 , 0 , 0 ,
 0 , 0 , 0 , 0 ,
-0 , 0 , 0 , ' handle-CSI ,
+0 , 0 , 0 , ' handle-CSI-key ,
 0 , 0 , 0 , 0 ,
 
 : handle-ESC-O

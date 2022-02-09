@@ -6,8 +6,17 @@
  *
  * This code is licensed under the GPL
  */
+
 #ifndef SOFTMMU_SEMI_H
-#define SOFTMMU_SEMI_H 1
+#define SOFTMMU_SEMI_H
+
+static inline uint64_t softmmu_tget64(CPUArchState *env, target_ulong addr)
+{
+    uint64_t val;
+
+    cpu_memory_rw_debug(ENV_GET_CPU(env), addr, (uint8_t *)&val, 8, 0);
+    return tswap64(val);
+}
 
 static inline uint32_t softmmu_tget32(CPUArchState *env, target_ulong addr)
 {
@@ -16,6 +25,7 @@ static inline uint32_t softmmu_tget32(CPUArchState *env, target_ulong addr)
     cpu_memory_rw_debug(ENV_GET_CPU(env), addr, (uint8_t *)&val, 4, 0);
     return tswap32(val);
 }
+
 static inline uint32_t softmmu_tget8(CPUArchState *env, target_ulong addr)
 {
     uint8_t val;
@@ -24,9 +34,17 @@ static inline uint32_t softmmu_tget8(CPUArchState *env, target_ulong addr)
     return val;
 }
 
+#define get_user_u64(arg, p) ({ arg = softmmu_tget64(env, p); 0; })
 #define get_user_u32(arg, p) ({ arg = softmmu_tget32(env, p) ; 0; })
 #define get_user_u8(arg, p) ({ arg = softmmu_tget8(env, p) ; 0; })
 #define get_user_ual(arg, p) get_user_u32(arg, p)
+
+static inline void softmmu_tput64(CPUArchState *env,
+                                  target_ulong addr, uint64_t val)
+{
+    val = tswap64(val);
+    cpu_memory_rw_debug(ENV_GET_CPU(env), addr, (uint8_t *)&val, 8, 1);
+}
 
 static inline void softmmu_tput32(CPUArchState *env,
                                   target_ulong addr, uint32_t val)
@@ -34,6 +52,7 @@ static inline void softmmu_tput32(CPUArchState *env,
     val = tswap32(val);
     cpu_memory_rw_debug(ENV_GET_CPU(env), addr, (uint8_t *)&val, 4, 1);
 }
+#define put_user_u64(arg, p) ({ softmmu_tput64(env, p, arg) ; 0; })
 #define put_user_u32(arg, p) ({ softmmu_tput32(env, p, arg) ; 0; })
 #define put_user_ual(arg, p) put_user_u32(arg, p)
 

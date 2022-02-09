@@ -1176,7 +1176,7 @@ nv_mgmt_get_version ( struct forcedeth_private *priv )
 		ioaddr + NvRegTransmitterControl );
 	start = currticks();
 
-	while ( currticks() > start + 5 * ticks_per_sec() ) {
+	while ( currticks() > start + 5 * TICKS_PER_SEC ) {
 		data_ready2 = readl ( ioaddr + NvRegTransmitterControl );
 		if ( ( data_ready & NVREG_XMITCTL_DATA_READY ) !=
 		     ( data_ready2 & NVREG_XMITCTL_DATA_READY ) ) {
@@ -1749,10 +1749,8 @@ forcedeth_map_regs ( struct forcedeth_private *priv )
 	for ( reg = PCI_BASE_ADDRESS_0; reg <= PCI_BASE_ADDRESS_5; reg += 4 ) {
 		pci_read_config_dword ( priv->pci_dev, reg, &bar );
 
-		if ( ( ( bar & PCI_BASE_ADDRESS_SPACE ) ==
-			 PCI_BASE_ADDRESS_SPACE_MEMORY ) &&
-		       ( pci_bar_size ( priv->pci_dev, reg ) >=
-			 register_size ) ) {
+		if ( ( ! ( bar & PCI_BASE_ADDRESS_SPACE_IO ) ) &&
+		     ( pci_bar_size ( priv->pci_dev, reg ) >= register_size ) ){
 			addr = pci_bar_start ( priv->pci_dev, reg );
 			break;
 		}

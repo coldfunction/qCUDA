@@ -14,6 +14,7 @@
  * GNU General Public License for more details.
  */
 
+#include "qemu/osdep.h"
 #include "net/net.h"
 #include "hw/hw.h"
 #include "hw/pci/pci.h"
@@ -64,13 +65,7 @@ char *desc_get_buf(DescInfo *info, bool read_only)
         info->buf_size = size;
     }
 
-    if (!info->buf) {
-        return NULL;
-    }
-
-    if (pci_dma_read(dev, le64_to_cpu(info->desc.buf_addr), info->buf, size)) {
-        return NULL;
-    }
+    pci_dma_read(dev, le64_to_cpu(info->desc.buf_addr), info->buf, size);
 
     return info->buf;
 }
@@ -136,18 +131,13 @@ bool desc_ring_set_size(DescRing *ring, uint32_t size)
     }
 
     for (i = 0; i < ring->size; i++) {
-        if (ring->info[i].buf) {
-            g_free(ring->info[i].buf);
-        }
+        g_free(ring->info[i].buf);
     }
 
     ring->size = size;
     ring->head = ring->tail = 0;
 
-    ring->info = g_realloc(ring->info, size * sizeof(DescInfo));
-    if (!ring->info) {
-        return false;
-    }
+    ring->info = g_renew(DescInfo, ring->info, size);
 
     memset(ring->info, 0, size * sizeof(DescInfo));
 
@@ -347,10 +337,7 @@ DescRing *desc_ring_alloc(Rocker *r, int index)
 {
     DescRing *ring;
 
-    ring = g_malloc0(sizeof(DescRing));
-    if (!ring) {
-        return NULL;
-    }
+    ring = g_new0(DescRing, 1);
 
     ring->r = r;
     ring->index = index;
@@ -360,9 +347,7 @@ DescRing *desc_ring_alloc(Rocker *r, int index)
 
 void desc_ring_free(DescRing *ring)
 {
-    if (ring->info) {
-        g_free(ring->info);
-    }
+    g_free(ring->info);
     g_free(ring);
 }
 

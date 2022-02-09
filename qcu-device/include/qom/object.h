@@ -14,13 +14,8 @@
 #ifndef QEMU_OBJECT_H
 #define QEMU_OBJECT_H
 
-#include <glib.h>
-#include <stdint.h>
-#include <stdbool.h>
+#include "qapi/qapi-builtin-types.h"
 #include "qemu/queue.h"
-#include "qapi/error.h"
-
-struct Visitor;
 
 struct TypeImpl;
 typedef struct TypeImpl *Type;
@@ -83,6 +78,28 @@ typedef struct InterfaceInfo InterfaceInfo;
  * In the above example, we create a simple type that is described by #TypeInfo.
  * #TypeInfo describes information about the type including what it inherits
  * from, the instance and class size, and constructor/destructor hooks.
+ *
+ * Alternatively several static types could be registered using helper macro
+ * DEFINE_TYPES()
+ *
+ * <example>
+ *   <programlisting>
+ * static const TypeInfo device_types_info[] = {
+ *     {
+ *         .name = TYPE_MY_DEVICE_A,
+ *         .parent = TYPE_DEVICE,
+ *         .instance_size = sizeof(MyDeviceA),
+ *     },
+ *     {
+ *         .name = TYPE_MY_DEVICE_B,
+ *         .parent = TYPE_DEVICE,
+ *         .instance_size = sizeof(MyDeviceB),
+ *     },
+ * };
+ *
+ * DEFINE_TYPES(device_types_info)
+ *   </programlisting>
+ * </example>
  *
  * Every type has an #ObjectClass associated with it.  #ObjectClass derivatives
  * are instantiated dynamically but there is only ever one instance for any
@@ -291,16 +308,16 @@ typedef struct InterfaceInfo InterfaceInfo;
  * ObjectPropertyAccessor:
  * @obj: the object that owns the property
  * @v: the visitor that contains the property data
- * @opaque: the object property opaque
  * @name: the name of the property
+ * @opaque: the object property opaque
  * @errp: a pointer to an Error that is filled if getting/setting fails.
  *
  * Called when trying to get/set a property.
  */
 typedef void (ObjectPropertyAccessor)(Object *obj,
-                                      struct Visitor *v,
-                                      void *opaque,
+                                      Visitor *v,
                                       const char *name,
+                                      void *opaque,
                                       Error **errp);
 
 /**
@@ -344,8 +361,6 @@ typedef struct ObjectProperty
     ObjectPropertyResolve *resolve;
     ObjectPropertyRelease *release;
     void *opaque;
-
-    QTAILQ_ENTRY(ObjectProperty) node;
 } ObjectProperty;
 
 /**
@@ -383,6 +398,8 @@ struct ObjectClass
     const char *class_cast_cache[OBJECT_CLASS_CAST_CACHE];
 
     ObjectUnparent *unparent;
+
+    GHashTable *properties;
 };
 
 /**
@@ -396,16 +413,13 @@ struct ObjectClass
  * As a result, #Object contains a reference to the objects type as its
  * first member.  This allows identification of the real type of the object at
  * run time.
- *
- * #Object also contains a list of #Interfaces that this object
- * implements.
  */
 struct Object
 {
     /*< private >*/
     ObjectClass *class;
     ObjectFree *free;
-    QTAILQ_HEAD(, ObjectProperty) properties;
+    GHashTable *properties;
     uint32_t ref;
     Object *parent;
 };
@@ -440,7 +454,7 @@ struct Object
  * @class_base_init: This function is called for all base classes after all
  *   parent class initialization has occurred, but before the class itself
  *   is initialized.  This is the function to use to undo the effects of
- *   memcpy from the parent class to the descendents.
+ *   memcpy from the parent class to the descendants.
  * @class_finalize: This function is called during class destruction and is
  *   meant to release and dynamic parameters allocated by @class_init.
  * @class_data: Data to pass to the @class_init, @class_base_init and
@@ -510,16 +524,16 @@ struct TypeInfo
 
 /**
  * OBJECT_CLASS_CHECK:
- * @class: The C type to use for the return value.
- * @obj: A derivative of @type to cast.
- * @name: the QOM typename of @class.
+ * @class_type: The C type to use for the return value.
+ * @class: A derivative class of @class_type to cast.
+ * @name: the QOM typename of @class_type.
  *
  * A type safe version of @object_class_dynamic_cast_assert.  This macro is
  * typically wrapped by each type to perform type safe casts of a class to a
  * specific class type.
  */
-#define OBJECT_CLASS_CHECK(class, obj, name) \
-    ((class *)object_class_dynamic_cast_assert(OBJECT_CLASS(obj), (name), \
+#define OBJECT_CLASS_CHECK(class_type, class, name) \
+    ((class_type *)object_class_dynamic_cast_assert(OBJECT_CLASS(class), (name), \
                                                __FILE__, __LINE__, __func__))
 
 /**
@@ -593,18 +607,6 @@ struct InterfaceClass
  * Returns: The newly allocated and instantiated object.
  */
 Object *object_new(const char *typename);
-
-/**
- * object_new_with_type:
- * @type: The type of the object to instantiate.
- *
- * This function will initialize a new object using heap allocated memory.
- * The returned object has a reference count of 1, and will be freed when
- * the last reference is dropped.
- *
- * Returns: The newly allocated and instantiated object.
- */
-Object *object_new_with_type(Type type);
 
 /**
  * object_new_with_props:
@@ -735,18 +737,6 @@ int object_set_propv(Object *obj,
                      va_list vargs);
 
 /**
- * object_initialize_with_type:
- * @data: A pointer to the memory to be used for the object.
- * @size: The maximum size available at @data for the object.
- * @type: The type of the object to instantiate.
- *
- * This function will initialize an object.  The memory for the object should
- * have already been allocated.  The returned object has a reference count of 1,
- * and will be finalized when the last reference is dropped.
- */
-void object_initialize_with_type(void *data, size_t size, Type type);
-
-/**
  * object_initialize:
  * @obj: A pointer to the memory to be used for the object.
  * @size: The maximum size available at @obj for the object.
@@ -796,7 +786,7 @@ ObjectClass *object_get_class(Object *obj);
  *
  * Returns: The QOM typename of @obj.
  */
-const char *object_get_typename(Object *obj);
+const char *object_get_typename(const Object *obj);
 
 /**
  * type_register_static:
@@ -805,7 +795,7 @@ const char *object_get_typename(Object *obj);
  * @info and all of the strings it points to should exist for the life time
  * that the type is registered.
  *
- * Returns: 0 on failure, the new #Type on success.
+ * Returns: the new #Type.
  */
 Type type_register_static(const TypeInfo *info);
 
@@ -816,9 +806,33 @@ Type type_register_static(const TypeInfo *info);
  * Unlike type_register_static(), this call does not require @info or its
  * string members to continue to exist after the call returns.
  *
- * Returns: 0 on failure, the new #Type on success.
+ * Returns: the new #Type.
  */
 Type type_register(const TypeInfo *info);
+
+/**
+ * type_register_static_array:
+ * @infos: The array of the new type #TypeInfo structures.
+ * @nr_infos: number of entries in @infos
+ *
+ * @infos and all of the strings it points to should exist for the life time
+ * that the type is registered.
+ */
+void type_register_static_array(const TypeInfo *infos, int nr_infos);
+
+/**
+ * DEFINE_TYPES:
+ * @type_array: The array containing #TypeInfo structures to register
+ *
+ * @type_array should be static constant that exists for the life time
+ * that the type is registered.
+ */
+#define DEFINE_TYPES(type_array)                                            \
+static void do_qemu_init_ ## type_array(void)                               \
+{                                                                           \
+    type_register_static_array(type_array, ARRAY_SIZE(type_array));         \
+}                                                                           \
+type_init(do_qemu_init_ ## type_array)
 
 /**
  * object_class_dynamic_cast_assert:
@@ -900,6 +914,17 @@ GSList *object_class_get_list(const char *implements_type,
                               bool include_abstract);
 
 /**
+ * object_class_get_list_sorted:
+ * @implements_type: The type to filter for, including its derivatives.
+ * @include_abstract: Whether to include abstract classes.
+ *
+ * Returns: A singly-linked list of the classes in alphabetical
+ * case-insensitive order.
+ */
+GSList *object_class_get_list_sorted(const char *implements_type,
+                              bool include_abstract);
+
+/**
  * object_ref:
  * @obj: the object
  *
@@ -909,7 +934,7 @@ GSList *object_class_get_list(const char *implements_type,
 void object_ref(Object *obj);
 
 /**
- * qdef_unref:
+ * object_unref:
  * @obj: the object
  *
  * Decrease the reference count of a object.  A object cannot be freed as long
@@ -949,6 +974,13 @@ ObjectProperty *object_property_add(Object *obj, const char *name,
 
 void object_property_del(Object *obj, const char *name, Error **errp);
 
+ObjectProperty *object_class_property_add(ObjectClass *klass, const char *name,
+                                          const char *type,
+                                          ObjectPropertyAccessor *get,
+                                          ObjectPropertyAccessor *set,
+                                          ObjectPropertyRelease *release,
+                                          void *opaque, Error **errp);
+
 /**
  * object_property_find:
  * @obj: the object
@@ -959,6 +991,71 @@ void object_property_del(Object *obj, const char *name, Error **errp);
  */
 ObjectProperty *object_property_find(Object *obj, const char *name,
                                      Error **errp);
+ObjectProperty *object_class_property_find(ObjectClass *klass, const char *name,
+                                           Error **errp);
+
+typedef struct ObjectPropertyIterator {
+    ObjectClass *nextclass;
+    GHashTableIter iter;
+} ObjectPropertyIterator;
+
+/**
+ * object_property_iter_init:
+ * @obj: the object
+ *
+ * Initializes an iterator for traversing all properties
+ * registered against an object instance, its class and all parent classes.
+ *
+ * It is forbidden to modify the property list while iterating,
+ * whether removing or adding properties.
+ *
+ * Typical usage pattern would be
+ *
+ * <example>
+ *   <title>Using object property iterators</title>
+ *   <programlisting>
+ *   ObjectProperty *prop;
+ *   ObjectPropertyIterator iter;
+ *
+ *   object_property_iter_init(&iter, obj);
+ *   while ((prop = object_property_iter_next(&iter))) {
+ *     ... do something with prop ...
+ *   }
+ *   </programlisting>
+ * </example>
+ */
+void object_property_iter_init(ObjectPropertyIterator *iter,
+                               Object *obj);
+
+/**
+ * object_class_property_iter_init:
+ * @klass: the class
+ *
+ * Initializes an iterator for traversing all properties
+ * registered against an object class and all parent classes.
+ *
+ * It is forbidden to modify the property list while iterating,
+ * whether removing or adding properties.
+ *
+ * This can be used on abstract classes as it does not create a temporary
+ * instance.
+ */
+void object_class_property_iter_init(ObjectPropertyIterator *iter,
+                                     ObjectClass *klass);
+
+/**
+ * object_property_iter_next:
+ * @iter: the iterator instance
+ *
+ * Return the next available property. If no further properties
+ * are available, a %NULL value will be returned and the @iter
+ * pointer should not be used again after this point without
+ * re-initializing it.
+ *
+ * Returns: the next property, or %NULL when all properties
+ * have been traversed.
+ */
+ObjectProperty *object_property_iter_next(ObjectPropertyIterator *iter);
 
 void object_unparent(Object *obj);
 
@@ -972,7 +1069,7 @@ void object_unparent(Object *obj);
  *
  * Reads a property from a object.
  */
-void object_property_get(Object *obj, struct Visitor *v, const char *name,
+void object_property_get(Object *obj, Visitor *v, const char *name,
                          Error **errp);
 
 /**
@@ -1063,11 +1160,34 @@ void object_property_set_int(Object *obj, int64_t value,
  * @name: the name of the property
  * @errp: returns an error if this function fails
  *
- * Returns: the value of the property, converted to an integer, or NULL if
+ * Returns: the value of the property, converted to an integer, or negative if
  * an error occurs (including when the property value is not an integer).
  */
 int64_t object_property_get_int(Object *obj, const char *name,
                                 Error **errp);
+
+/**
+ * object_property_set_uint:
+ * @value: the value to be written to the property
+ * @name: the name of the property
+ * @errp: returns an error if this function fails
+ *
+ * Writes an unsigned integer value to a property.
+ */
+void object_property_set_uint(Object *obj, uint64_t value,
+                              const char *name, Error **errp);
+
+/**
+ * object_property_get_uint:
+ * @obj: the object
+ * @name: the name of the property
+ * @errp: returns an error if this function fails
+ *
+ * Returns: the value of the property, converted to an unsigned integer, or 0
+ * an error occurs (including when the property value is not an integer).
+ */
+uint64_t object_property_get_uint(Object *obj, const char *name,
+                                  Error **errp);
 
 /**
  * object_property_get_enum:
@@ -1108,7 +1228,7 @@ void object_property_get_uint16List(Object *obj, const char *name,
  *
  * Writes a property to a object.
  */
-void object_property_set(Object *obj, struct Visitor *v, const char *name,
+void object_property_set(Object *obj, Visitor *v, const char *name,
                          Error **errp);
 
 /**
@@ -1165,6 +1285,17 @@ Object *object_get_root(void);
  * Returns: the user object container
  */
 Object *object_get_objects_root(void);
+
+/**
+ * object_get_internal_root:
+ *
+ * Get the container object that holds internally used object
+ * instances.  Any object which is put into this container must not be
+ * user visible, and it will not be exposed in the QOM tree.
+ *
+ * Returns: the internal object container
+ */
+Object *object_get_internal_root(void);
 
 /**
  * object_get_canonical_path_component:
@@ -1272,7 +1403,7 @@ typedef enum {
  * callback function.  It allows the link property to be set and never returns
  * an error.
  */
-void object_property_allow_set_link(Object *, const char *,
+void object_property_allow_set_link(const Object *, const char *,
                                     Object *, Error **);
 
 /**
@@ -1305,7 +1436,7 @@ void object_property_allow_set_link(Object *, const char *,
  */
 void object_property_add_link(Object *obj, const char *name,
                               const char *type, Object **child,
-                              void (*check)(Object *obj, const char *name,
+                              void (*check)(const Object *obj, const char *name,
                                             Object *val, Error **errp),
                               ObjectPropertyLinkFlags flags,
                               Error **errp);
@@ -1327,6 +1458,12 @@ void object_property_add_str(Object *obj, const char *name,
                              void (*set)(Object *, const char *, Error **),
                              Error **errp);
 
+void object_class_property_add_str(ObjectClass *klass, const char *name,
+                                   char *(*get)(Object *, Error **),
+                                   void (*set)(Object *, const char *,
+                                               Error **),
+                                   Error **errp);
+
 /**
  * object_property_add_bool:
  * @obj: the object to add a property to
@@ -1343,6 +1480,11 @@ void object_property_add_bool(Object *obj, const char *name,
                               void (*set)(Object *, bool, Error **),
                               Error **errp);
 
+void object_class_property_add_bool(ObjectClass *klass, const char *name,
+                                    bool (*get)(Object *, Error **),
+                                    void (*set)(Object *, bool, Error **),
+                                    Error **errp);
+
 /**
  * object_property_add_enum:
  * @obj: the object to add a property to
@@ -1357,10 +1499,17 @@ void object_property_add_bool(Object *obj, const char *name,
  */
 void object_property_add_enum(Object *obj, const char *name,
                               const char *typename,
-                              const char * const *strings,
+                              const QEnumLookup *lookup,
                               int (*get)(Object *, Error **),
                               void (*set)(Object *, int, Error **),
                               Error **errp);
+
+void object_class_property_add_enum(ObjectClass *klass, const char *name,
+                                    const char *typename,
+                                    const QEnumLookup *lookup,
+                                    int (*get)(Object *, Error **),
+                                    void (*set)(Object *, int, Error **),
+                                    Error **errp);
 
 /**
  * object_property_add_tm:
@@ -1376,6 +1525,10 @@ void object_property_add_tm(Object *obj, const char *name,
                             void (*get)(Object *, struct tm *, Error **),
                             Error **errp);
 
+void object_class_property_add_tm(ObjectClass *klass, const char *name,
+                                  void (*get)(Object *, struct tm *, Error **),
+                                  Error **errp);
+
 /**
  * object_property_add_uint8_ptr:
  * @obj: the object to add a property to
@@ -1388,6 +1541,8 @@ void object_property_add_tm(Object *obj, const char *name,
  */
 void object_property_add_uint8_ptr(Object *obj, const char *name,
                                    const uint8_t *v, Error **errp);
+void object_class_property_add_uint8_ptr(ObjectClass *klass, const char *name,
+                                         const uint8_t *v, Error **errp);
 
 /**
  * object_property_add_uint16_ptr:
@@ -1401,6 +1556,8 @@ void object_property_add_uint8_ptr(Object *obj, const char *name,
  */
 void object_property_add_uint16_ptr(Object *obj, const char *name,
                                     const uint16_t *v, Error **errp);
+void object_class_property_add_uint16_ptr(ObjectClass *klass, const char *name,
+                                          const uint16_t *v, Error **errp);
 
 /**
  * object_property_add_uint32_ptr:
@@ -1414,6 +1571,8 @@ void object_property_add_uint16_ptr(Object *obj, const char *name,
  */
 void object_property_add_uint32_ptr(Object *obj, const char *name,
                                     const uint32_t *v, Error **errp);
+void object_class_property_add_uint32_ptr(ObjectClass *klass, const char *name,
+                                          const uint32_t *v, Error **errp);
 
 /**
  * object_property_add_uint64_ptr:
@@ -1427,6 +1586,8 @@ void object_property_add_uint32_ptr(Object *obj, const char *name,
  */
 void object_property_add_uint64_ptr(Object *obj, const char *name,
                                     const uint64_t *v, Error **Errp);
+void object_class_property_add_uint64_ptr(ObjectClass *klass, const char *name,
+                                          const uint64_t *v, Error **Errp);
 
 /**
  * object_property_add_alias:
@@ -1478,6 +1639,9 @@ void object_property_add_const_link(Object *obj, const char *name,
  */
 void object_property_set_description(Object *obj, const char *name,
                                      const char *description, Error **errp);
+void object_class_property_set_description(ObjectClass *klass, const char *name,
+                                           const char *description,
+                                           Error **errp);
 
 /**
  * object_child_foreach:
@@ -1488,11 +1652,32 @@ void object_property_set_description(Object *obj, const char *name,
  * Call @fn passing each child of @obj and @opaque to it, until @fn returns
  * non-zero.
  *
+ * It is forbidden to add or remove children from @obj from the @fn
+ * callback.
+ *
  * Returns: The last value returned by @fn, or 0 if there is no child.
  */
 int object_child_foreach(Object *obj, int (*fn)(Object *child, void *opaque),
                          void *opaque);
 
+/**
+ * object_child_foreach_recursive:
+ * @obj: the object whose children will be navigated
+ * @fn: the iterator function to be called
+ * @opaque: an opaque value that will be passed to the iterator
+ *
+ * Call @fn passing each child of @obj and @opaque to it, until @fn returns
+ * non-zero. Calls recursively, all child nodes of @obj will also be passed
+ * all the way down to the leaf nodes of the tree. Depth first ordering.
+ *
+ * It is forbidden to add or remove children from @obj (or its
+ * child nodes) from the @fn callback.
+ *
+ * Returns: The last value returned by @fn, or 0 if there is no child.
+ */
+int object_child_foreach_recursive(Object *obj,
+                                   int (*fn)(Object *child, void *opaque),
+                                   void *opaque);
 /**
  * container_get:
  * @root: root of the #path, e.g., object_get_root()
@@ -1505,5 +1690,11 @@ int object_child_foreach(Object *obj, int (*fn)(Object *child, void *opaque),
  */
 Object *container_get(Object *root, const char *path);
 
-
+/**
+ * object_type_get_instance_size:
+ * @typename: Name of the Type whose instance_size is required
+ *
+ * Returns the instance_size of the given @typename.
+ */
+size_t object_type_get_instance_size(const char *typename);
 #endif

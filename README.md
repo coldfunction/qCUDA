@@ -20,33 +20,41 @@ these three components are defined as follows:
 
 #### Host
 
-* CUDA 7.5
-* Ubuntu 14.04.3 LTS (GNU/Linux 3.19.0-25-generic x86_64)
-* export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/local/cuda/lib64"
+This branch 
+
+* **CUDA 9.0** (for ubuntu 17.04, gcc version=5.5.0)
+* Ubuntu 18.04 LTS (GNU/Linux 4.15.0-136-generic x86_64)
+* export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/local/cuda-9.0/lib64"
 * export CUDA_HOME=/usr/local/cuda
 * Install required packages
-  
-	``` sh
-	sudo apt-get install -y  pkg-config bridge-utils uml-utilities zlib1g-dev libglib2.0-dev autoconf
-	automake libtool libsdl1.2-dev libsasl2-dev libcurl4-openssl-dev libsasl2-dev libaio-dev libvde-dev
-	```
+
+``` sh
+sudo apt install -y  pkg-config bridge-utils uml-utilities zlib1g-dev libglib2.0-dev autoconf \
+automake libtool libsdl1.2-dev libsasl2-dev libcurl4-openssl-dev libsasl2-dev libaio-dev libvde-dev \
+libsdl2-dev libaio-dev  libattr1-dev libbrlapi-dev libcap-ng-dev libgnutls28-dev libgtk-3-dev libiscsi-dev liblttng-ust-dev \
+libncurses5-dev libnfs-dev libnss3-dev libpixman-1-dev libpng-dev librados-dev libsdl1.2-dev libseccomp-dev \ 
+libspice-protocol-dev libspice-server-dev libssh2-1-dev liburcu-dev libusb-1.0-0-dev libvte-dev sparse uuid-dev \ 
+flex bison
+ ```
 
 #### Guest
 
-* Ubuntu 14.04 image (guest OS)
-* Windows 8 image (guest OS)
+* Ubuntu 18.04 LTS image (guest OS)
  
 ### How to install
 
 #### Host
 
-* `qcu-device` was modified from QEMU 2.4.0, for further information please refer to [QEMU installation steps](https://en.wikibooks.org/wiki/QEMU/Installing_QEMU)
+* `qcu-device` was modified from QEMU 2.12.1, for further information please refer to [QEMU installation steps](https://en.wikibooks.org/wiki/QEMU/Installing_QEMU)
 
 1. clone this repo.
-2. cd qcu-device
-3. ./configure --enable-cuda --target-list=x86_64-softmmu  && make -j16
-4. sudo mkdir /dev/qcuvf
-5. sudo chmod 777 /dev/qcuvf
+2. cd qcu-device 
+3. mkdir build && pushd build
+3. ../configure --enable-cuda --target-list=x86_64-softmmu  && make -j16 
+4. sudo make install
+5. popd   
+6. sudo mkdir /dev/qcuvf
+7. sudo chmod 777 /dev/qcuvf
 
 #### Guest
 

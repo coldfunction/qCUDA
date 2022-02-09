@@ -36,7 +36,7 @@ typedef long            intptr_t;
 #define PRIX64 "llX"
 #endif
 
-/* endianess */
+/* endianness */
 #include "autoconf.h"
 
 /* physical address */
@@ -84,21 +84,13 @@ typedef uint32_t        prom_uarg_t;
 /* size named types */
 
 typedef unsigned char   u8;
-typedef unsigned char   __u8;
 typedef unsigned short u16;
-typedef unsigned short __u16;
 typedef unsigned int   u32;
-typedef unsigned int   __u32;
 typedef unsigned long long u64;
-typedef unsigned long long __u64;
 
 typedef signed char	s8;
-typedef signed char	__s8;
 typedef short		s16;
-typedef short		__s16;
 typedef int		s32;
-typedef int		__s32;
 typedef long long	s64;
-typedef long long	__s64;
 
 #endif

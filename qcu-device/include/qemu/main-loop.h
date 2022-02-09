@@ -23,7 +23,7 @@
  */
 
 #ifndef QEMU_MAIN_LOOP_H
-#define QEMU_MAIN_LOOP_H 1
+#define QEMU_MAIN_LOOP_H
 
 #include "block/aio.h"
 
@@ -64,11 +64,11 @@ int qemu_init_main_loop(Error **errp);
  *
  *     void enter_co_bh(void *opaque) {
  *         QEMUCoroutine *co = opaque;
- *         qemu_coroutine_enter(co, NULL);
+ *         qemu_coroutine_enter(co);
  *     }
  *
  *     ...
- *     QEMUCoroutine *co = qemu_coroutine_create(coroutine_entry);
+ *     QEMUCoroutine *co = qemu_coroutine_create(coroutine_entry, NULL);
  *     QEMUBH *start_bh = qemu_bh_new(enter_co_bh, co);
  *     qemu_bh_schedule(start_bh);
  *     while (...) {
@@ -79,7 +79,7 @@ int qemu_init_main_loop(Error **errp);
  *
  * @nonblocking: Whether the caller should block until an event occurs.
  */
-int main_loop_wait(int nonblocking);
+void main_loop_wait(int nonblocking);
 
 /**
  * qemu_get_aio_context: Return the main loop's AioContext
@@ -203,6 +203,23 @@ void qemu_set_fd_handler(int fd,
                          IOHandler *fd_write,
                          void *opaque);
 
+
+/**
+ * event_notifier_set_handler: Register an EventNotifier with the main loop
+ *
+ * This function tells the main loop to wake up whenever the
+ * #EventNotifier was set.
+ *
+ * @e: The #EventNotifier to be observed.
+ *
+ * @handler: A level-triggered callback that is fired when @e
+ * has been set.  @e is passed to it as a parameter.
+ */
+void event_notifier_set_handler(EventNotifier *e,
+                                EventNotifierHandler *handler);
+
+GSource *iohandler_get_g_source(void);
+AioContext *iohandler_get_aio_context(void);
 #ifdef CONFIG_POSIX
 /**
  * qemu_add_child_watch: Register a child process for reaping.
@@ -236,7 +253,7 @@ bool qemu_mutex_iothread_locked(void);
  * qemu_mutex_lock_iothread: Lock the main loop mutex.
  *
  * This function locks the main loop mutex.  The mutex is taken by
- * qemu_init_main_loop and always taken except while waiting on
+ * main() in vl.c and always taken except while waiting on
  * external events (such as with select).  The mutex should be taken
  * by threads other than the main loop thread when calling
  * qemu_bh_new(), qemu_set_fd_handler() and basically all other
@@ -251,7 +268,7 @@ void qemu_mutex_lock_iothread(void);
  * qemu_mutex_unlock_iothread: Unlock the main loop mutex.
  *
  * This function unlocks the main loop mutex.  The mutex is taken by
- * qemu_init_main_loop and always taken except while waiting on
+ * main() in vl.c and always taken except while waiting on
  * external events (such as with select).  The mutex should be unlocked
  * as soon as possible by threads other than the main loop thread,
  * because it prevents the main loop from processing callbacks,
@@ -265,8 +282,6 @@ void qemu_mutex_unlock_iothread(void);
 /* internal interfaces */
 
 void qemu_fd_register(int fd);
-void qemu_iohandler_fill(GArray *pollfds);
-void qemu_iohandler_poll(GArray *pollfds, int rc);
 
 QEMUBH *qemu_bh_new(QEMUBHFunc *cb, void *opaque);
 void qemu_bh_schedule_idle(QEMUBH *bh);

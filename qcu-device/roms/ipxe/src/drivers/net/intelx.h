@@ -7,7 +7,7 @@
  *
  */
 
-FILE_LICENCE ( GPL2_OR_LATER );
+FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <stdint.h>
 #include <ipxe/if_ether.h>
@@ -70,6 +70,9 @@ FILE_LICENCE ( GPL2_OR_LATER );
 
 /** Receive Descriptor register block */
 #define INTELX_RD 0x01000UL
+
+/** Receive Descriptor Control Register */
+#define INTELX_RXDCTL_VME	0x40000000UL	/**< Strip VLAN tag */
 
 /** Split Receive Control Register */
 #define INTELX_SRRCTL 0x02100UL

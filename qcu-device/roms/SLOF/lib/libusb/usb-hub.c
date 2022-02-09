@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "usb-core.h"
+#include "usb-xhci.h"
 
 #undef HUB_DEBUG
 //#define HUB_DEBUG
@@ -38,6 +39,7 @@ struct usb_hub_ps {
 #define HUB_PS_RESET                 (1 << 4)
 #define HUB_PS_POWER                 (1 << 8)
 #define HUB_PS_LOW_SPEED             (1 << 9)
+#define HUB_PS_HIGH_SPEED            (1 << 10)
 
 #define HUB_PF_CONNECTION        0
 #define HUB_PF_ENABLE            1
@@ -151,11 +153,49 @@ static int hub_check_port(struct usb_dev *dev, int port)
 	return false;
 }
 
+static bool usb_hub_init_dev(struct usb_dev *hub_dev, int port)
+{
+	struct usb_dev *newdev;
+
+	if (hub_dev->hcidev->type == USB_XHCI) {
+		struct usb_hub_ps ps;
+		int slotspeed;
+
+		hub_get_port_status(hub_dev, port, &ps, sizeof(ps));
+		if (le16_to_cpu(ps.wPortStatus) & HUB_PS_LOW_SPEED)
+			slotspeed = SLOT_SPEED_LS;
+		else if (le16_to_cpu(ps.wPortStatus) & HUB_PS_HIGH_SPEED)
+			slotspeed = SLOT_SPEED_HS;
+		else
+			slotspeed = SLOT_SPEED_FS;
+
+		/*
+		 * USB3 devices need special setup (e.g. with assigning
+		 * a slot ID and route string), which will all be done
+		 * by usb3_dev_init() - it also calls usb_devpool_get(),
+		 * usb_setup_new_device() and usb_slof_populate_new_device()
+		 * internally, so we can return immediately after this step.
+		 */
+		return usb3_dev_init(hub_dev->hcidev->priv, hub_dev, port,
+				     slotspeed);
+	}
+
+	newdev = usb_devpool_get();
+	dprintf("usb-hub: allocated device %p\n", newdev);
+	newdev->hub = hub_dev;
+	newdev->hcidev = hub_dev->hcidev;
+	if (usb_setup_new_device(newdev, port)) {
+		usb_slof_populate_new_device(newdev);
+		return true;
+	}
+
+	return false;
+}
+
 unsigned int usb_hub_init(void *hubdev)
 {
 	struct usb_dev *dev = hubdev;
 	struct usb_dev_hub_descr hub;
-	struct usb_dev *newdev;
 	int i;
 
 	dprintf("%s: enter %p\n", __func__, dev);
@@ -172,10 +212,7 @@ unsigned int usb_hub_init(void *hubdev)
 			dprintf("***********************************************\n");
 			dprintf("\t\tusb-hub: device found %d\n", i);
 			dprintf("***********************************************\n");
-			newdev = usb_devpool_get();
-			dprintf("usb-hub: allocated device %p\n", newdev);
-			newdev->hcidev = dev->hcidev;
-			if (!setup_new_device(newdev, i))
+			if (!usb_hub_init_dev(dev, i))
 				printf("usb-hub: unable to setup device on port %d\n", i);
 		}
 	}

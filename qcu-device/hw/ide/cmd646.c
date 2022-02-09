@@ -22,15 +22,15 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-#include <hw/hw.h>
-#include <hw/i386/pc.h>
-#include <hw/pci/pci.h>
-#include <hw/isa/isa.h>
-#include "sysemu/block-backend.h"
+#include "qemu/osdep.h"
+#include "hw/hw.h"
+#include "hw/pci/pci.h"
+#include "hw/isa/isa.h"
 #include "sysemu/sysemu.h"
 #include "sysemu/dma.h"
 
-#include <hw/ide/pci.h>
+#include "hw/ide/pci.h"
+#include "trace.h"
 
 /* CMD646 specific */
 #define CFR		0x50
@@ -194,9 +194,8 @@ static uint64_t bmdma_read(void *opaque, hwaddr addr,
         val = 0xff;
         break;
     }
-#ifdef DEBUG_IDE
-    printf("bmdma: readb " TARGET_FMT_plx " : 0x%02x\n", addr, val);
-#endif
+
+    trace_bmdma_read_cmd646(addr, val);
     return val;
 }
 
@@ -210,9 +209,7 @@ static void bmdma_write(void *opaque, hwaddr addr,
         return;
     }
 
-#ifdef DEBUG_IDE
-    printf("bmdma: writeb " TARGET_FMT_plx " : 0x%" PRIx64 "\n", addr, val);
-#endif
+    trace_bmdma_write_cmd646(addr, val);
     switch(addr & 3) {
     case 0:
         bmdma_cmd_writeb(bm, val);
@@ -417,6 +414,7 @@ static void cmd646_ide_class_init(ObjectClass *klass, void *data)
     k->config_read = cmd646_pci_config_read;
     k->config_write = cmd646_pci_config_write;
     dc->props = cmd646_ide_properties;
+    set_bit(DEVICE_CATEGORY_STORAGE, dc->categories);
 }
 
 static const TypeInfo cmd646_ide_info = {

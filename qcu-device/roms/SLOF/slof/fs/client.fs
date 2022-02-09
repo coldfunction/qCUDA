@@ -282,6 +282,18 @@ ALSO client-voc DEFINITIONS
 ;
 
 \
+\ Standard for Boot, defined in 6.3.2.5:
+\
+: boot  ( zstr -- )
+   zcount
+   debug-client-interface? IF
+      ." ci: boot " 2dup type cr
+   THEN
+   " boot " 2swap $cat " boot-command" $setenv (nvupdate)
+   reset-all
+;
+
+\
 \ User Interface, defined in 6.3.2.6
 \
 : interpret ( ... zstr -- result ... )
@@ -295,5 +307,21 @@ ALSO client-voc DEFINITIONS
 \ Allow the client to register a callback
 : set-callback ( newfunc -- oldfunc )
   client-callback @ swap client-callback ! ;
+
+\ Custom method to get FDT blob
+: fdt-fetch ( buf len -- ret )
+    fdt-flatten-tree    ( buf len dtb )
+    dup >r
+    >fdth_tsize l@      ( buf len size r: dtb )
+    2dup < IF
+        ." ERROR: need " .d ." bytes, the buffer is " .d ." bytes only" cr
+        drop
+        -1
+    ELSE
+        nip r@ -rot move
+        0
+    THEN
+    r> fdt-flatten-tree-free
+;
 
 PREVIOUS DEFINITIONS

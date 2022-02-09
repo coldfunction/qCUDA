@@ -1,7 +1,7 @@
 #include <sys/time.h>
 
 
-#if 1
+#if 0
 enum
 {
 t_RegFatbin = 0,
@@ -67,4 +67,6 @@ int t_idx;
 #define print(fmt, arg...) 
 #define time_begin()
 #define time_end(str)
+#define time_fini()
+#define time_init()
 #endif

@@ -9,13 +9,15 @@
 #include "config.h" // CONFIG_*
 #include "dev-q35.h" // Q35_HOST_BRIDGE_PCIEXBAR_ADDR
 #include "dev-piix.h" // PIIX_*
+#include "e820map.h" // e820_add
 #include "hw/ata.h" // PORT_ATA1_CMD_BASE
 #include "hw/pci.h" // pci_config_readl
+#include "hw/pcidevice.h" // pci_probe_devices
 #include "hw/pci_ids.h" // PCI_VENDOR_ID_INTEL
 #include "hw/pci_regs.h" // PCI_COMMAND
+#include "fw/dev-pci.h" // REDHAT_CAP_RESOURCE_RESERVE
 #include "list.h" // struct hlist_node
 #include "malloc.h" // free
-#include "memmap.h" // add_e820
 #include "output.h" // dprintf
 #include "paravirt.h" // RamSize
 #include "romfile.h" // romfile_loadint
@@ -26,6 +28,17 @@
 #define PCI_DEVICE_MEM_MIN    (1<<12)  // 4k == page size
 #define PCI_BRIDGE_MEM_MIN    (1<<21)  // 2M == hugepage size
 #define PCI_BRIDGE_IO_MIN      0x1000  // mandated by pci bridge spec
+
+#define PCI_ROM_SLOT 6
+#define PCI_NUM_REGIONS 7
+#define PCI_BRIDGE_NUM_REGIONS 2
+
+enum pci_region_type {
+    PCI_REGION_TYPE_IO,
+    PCI_REGION_TYPE_MEM,
+    PCI_REGION_TYPE_PREFMEM,
+    PCI_REGION_TYPE_COUNT,
+};
 
 static const char *region_type_name[] = {
     [ PCI_REGION_TYPE_IO ]      = "io",
@@ -149,6 +162,22 @@ static void piix_isa_bridge_setup(struct pci_device *pci, void *arg)
     dprintf(1, "PIIX3/PIIX4 init: elcr=%02x %02x\n", elcr[0], elcr[1]);
 }
 
+static void mch_isa_lpc_setup(u16 bdf)
+{
+    /* pm io base */
+    pci_config_writel(bdf, ICH9_LPC_PMBASE,
+                      acpi_pm_base | ICH9_LPC_PMBASE_RTE);
+
+    /* acpi enable, SCI: IRQ9 000b = irq9*/
+    pci_config_writeb(bdf, ICH9_LPC_ACPI_CTRL, ICH9_LPC_ACPI_CTRL_ACPI_EN);
+
+    /* set root complex register block BAR */
+    pci_config_writel(bdf, ICH9_LPC_RCBA,
+                      ICH9_LPC_RCBA_ADDR | ICH9_LPC_RCBA_EN);
+}
+
+static int ICH9LpcBDF = -1;
+
 /* ICH9 LPC PCI to ISA bridge */
 /* PCI_VENDOR_ID_INTEL && PCI_DEVICE_ID_INTEL_ICH9_LPC */
 static void mch_isa_bridge_setup(struct pci_device *dev, void *arg)
@@ -176,12 +205,11 @@ static void mch_isa_bridge_setup(struct pci_device *dev, void *arg)
     outb(elcr[1], ICH9_LPC_PORT_ELCR2);
     dprintf(1, "Q35 LPC init: elcr=%02x %02x\n", elcr[0], elcr[1]);
 
-    /* pm io base */
-    pci_config_writel(bdf, ICH9_LPC_PMBASE,
-                      acpi_pm_base | ICH9_LPC_PMBASE_RTE);
+    ICH9LpcBDF = bdf;
 
-    /* acpi enable, SCI: IRQ9 000b = irq9*/
-    pci_config_writeb(bdf, ICH9_LPC_ACPI_CTRL, ICH9_LPC_ACPI_CTRL_ACPI_EN);
+    mch_isa_lpc_setup(bdf);
+
+    e820_add(ICH9_LPC_RCBA_ADDR, 16*1024, E820_RESERVED);
 
     acpi_pm1a_cnt = acpi_pm_base + 0x04;
     pmtimer_setup(acpi_pm_base + 0x08);
@@ -239,17 +267,69 @@ static void piix4_pm_setup(struct pci_device *pci, void *arg)
     pmtimer_setup(acpi_pm_base + 0x08);
 }
 
-/* ICH9 SMBUS */
-/* PCI_VENDOR_ID_INTEL && PCI_DEVICE_ID_INTEL_ICH9_SMBUS */
-static void ich9_smbus_setup(struct pci_device *dev, void *arg)
+static void ich9_smbus_enable(u16 bdf)
 {
-    u16 bdf = dev->bdf;
     /* map smbus into io space */
     pci_config_writel(bdf, ICH9_SMB_SMB_BASE,
                       (acpi_pm_base + 0x100) | PCI_BASE_ADDRESS_SPACE_IO);
 
     /* enable SMBus */
     pci_config_writeb(bdf, ICH9_SMB_HOSTC, ICH9_SMB_HOSTC_HST_EN);
+}
+
+static int ICH9SmbusBDF = -1;
+
+/* ICH9 SMBUS */
+/* PCI_VENDOR_ID_INTEL && PCI_DEVICE_ID_INTEL_ICH9_SMBUS */
+static void ich9_smbus_setup(struct pci_device *dev, void *arg)
+{
+    ICH9SmbusBDF = dev->bdf;
+
+    ich9_smbus_enable(dev->bdf);
+}
+
+static void intel_igd_setup(struct pci_device *dev, void *arg)
+{
+    struct romfile_s *opregion = romfile_find("etc/igd-opregion");
+    u64 bdsm_size = le64_to_cpu(romfile_loadint("etc/igd-bdsm-size", 0));
+    void *addr;
+    u16 bdf = dev->bdf;
+
+    /* Apply OpRegion to any Intel VGA device, more than one is undefined */
+    if (opregion && opregion->size) {
+        addr = memalign_high(PAGE_SIZE, opregion->size);
+        if (!addr) {
+            warn_noalloc();
+            return;
+        }
+
+        if (opregion->copy(opregion, addr, opregion->size) < 0) {
+            free(addr);
+            return;
+        }
+
+        pci_config_writel(bdf, 0xFC, cpu_to_le32((u32)addr));
+
+        dprintf(1, "Intel IGD OpRegion enabled at 0x%08x, size %dKB, dev "
+                "%02x:%02x.%x\n", (u32)addr, opregion->size >> 10,
+                pci_bdf_to_bus(bdf), pci_bdf_to_dev(bdf), pci_bdf_to_fn(bdf));
+    }
+
+    /* Apply BDSM only to Intel VGA at 00:02.0 */
+    if (bdsm_size && (bdf == pci_to_bdf(0, 2, 0))) {
+        addr = memalign_tmphigh(1024 * 1024, bdsm_size);
+        if (!addr) {
+            warn_noalloc();
+            return;
+        }
+
+        e820_add((u32)addr, bdsm_size, E820_RESERVED);
+
+        pci_config_writel(bdf, 0x5C, cpu_to_le32((u32)addr));
+
+        dprintf(1, "Intel IGD BDSM enabled at 0x%08x, size %lldMB, dev "
+                "00:02.0\n", (u32)addr, bdsm_size >> 20);
+    }
 }
 
 static const struct pci_device_id pci_device_tbl[] = {
@@ -269,7 +349,7 @@ static const struct pci_device_id pci_device_tbl[] = {
     PCI_DEVICE_CLASS(PCI_ANY_ID, PCI_ANY_ID, PCI_CLASS_STORAGE_IDE,
                      storage_ide_setup),
 
-    /* PIC, IBM, MIPC & MPIC2 */
+    /* PIC, IBM, MPIC & MPIC2 */
     PCI_DEVICE_CLASS(PCI_VENDOR_ID_IBM, 0x0046, PCI_CLASS_SYSTEM_PIC,
                      pic_ibm_setup),
     PCI_DEVICE_CLASS(PCI_VENDOR_ID_IBM, 0xFFFF, PCI_CLASS_SYSTEM_PIC,
@@ -285,8 +365,15 @@ static const struct pci_device_id pci_device_tbl[] = {
     PCI_DEVICE_CLASS(PCI_VENDOR_ID_APPLE, 0x0017, 0xff00, apple_macio_setup),
     PCI_DEVICE_CLASS(PCI_VENDOR_ID_APPLE, 0x0022, 0xff00, apple_macio_setup),
 
+    /* Intel IGD OpRegion setup */
+    PCI_DEVICE_CLASS(PCI_VENDOR_ID_INTEL, PCI_ANY_ID, PCI_CLASS_DISPLAY_VGA,
+                     intel_igd_setup),
+
     PCI_DEVICE_END,
 };
+
+static int MCHMmcfgBDF = -1;
+static void mch_mmconfig_setup(u16 bdf);
 
 void pci_resume(void)
 {
@@ -297,16 +384,27 @@ void pci_resume(void)
     if (PiixPmBDF >= 0) {
         piix4_pm_config_setup(PiixPmBDF);
     }
+
+    if (ICH9LpcBDF >= 0) {
+        mch_isa_lpc_setup(ICH9LpcBDF);
+    }
+
+    if (ICH9SmbusBDF >= 0) {
+        ich9_smbus_enable(ICH9SmbusBDF);
+    }
+
+    if(MCHMmcfgBDF >= 0) {
+        mch_mmconfig_setup(MCHMmcfgBDF);
+    }
 }
 
 static void pci_bios_init_device(struct pci_device *pci)
 {
-    u16 bdf = pci->bdf;
-    dprintf(1, "PCI: init bdf=%02x:%02x.%x id=%04x:%04x\n"
-            , pci_bdf_to_bus(bdf), pci_bdf_to_dev(bdf), pci_bdf_to_fn(bdf)
-            , pci->vendor, pci->device);
+    dprintf(1, "PCI: init bdf=%pP id=%04x:%04x\n"
+            , pci, pci->vendor, pci->device);
 
     /* map the interrupt */
+    u16 bdf = pci->bdf;
     int pin = pci_config_readb(bdf, PCI_INTERRUPT_PIN);
     if (pin != 0)
         pci_config_writeb(bdf, PCI_INTERRUPT_LINE, pci_slot_get_irq(pci, pin));
@@ -316,6 +414,10 @@ static void pci_bios_init_device(struct pci_device *pci)
     /* enable memory mappings */
     pci_config_maskw(bdf, PCI_COMMAND, 0,
                      PCI_COMMAND_IO | PCI_COMMAND_MEMORY | PCI_COMMAND_SERR);
+    /* enable SERR# for forwarding */
+    if (pci->header_type & PCI_HEADER_TYPE_BRIDGE)
+        pci_config_maskw(bdf, PCI_BRIDGE_CONTROL, 0,
+                         PCI_BRIDGE_CTL_SERR);
 }
 
 static void pci_bios_init_devices(void)
@@ -332,9 +434,7 @@ static void pci_enable_default_vga(void)
 
     foreachpci(pci) {
         if (is_pci_vga(pci)) {
-            dprintf(1, "PCI: Using %02x:%02x.%x for primary VGA\n",
-                    pci_bdf_to_bus(pci->bdf), pci_bdf_to_dev(pci->bdf),
-                    pci_bdf_to_fn(pci->bdf));
+            dprintf(1, "PCI: Using %pP for primary VGA\n", pci);
             return;
         }
     }
@@ -345,9 +445,7 @@ static void pci_enable_default_vga(void)
         return;
     }
 
-    dprintf(1, "PCI: Enabling %02x:%02x.%x for primary VGA\n",
-            pci_bdf_to_bus(pci->bdf), pci_bdf_to_dev(pci->bdf),
-            pci_bdf_to_fn(pci->bdf));
+    dprintf(1, "PCI: Enabling %pP for primary VGA\n", pci);
 
     pci_config_maskw(pci->bdf, PCI_COMMAND, 0,
                      PCI_COMMAND_IO | PCI_COMMAND_MEMORY);
@@ -355,9 +453,7 @@ static void pci_enable_default_vga(void)
     while (pci->parent) {
         pci = pci->parent;
 
-        dprintf(1, "PCI: Setting VGA enable on bridge %02x:%02x.%x\n",
-                pci_bdf_to_bus(pci->bdf), pci_bdf_to_dev(pci->bdf),
-                pci_bdf_to_fn(pci->bdf));
+        dprintf(1, "PCI: Setting VGA enable on bridge %pP\n", pci);
 
         pci_config_maskw(pci->bdf, PCI_BRIDGE_CONTROL, 0, PCI_BRIDGE_CTL_VGA);
         pci_config_maskw(pci->bdf, PCI_COMMAND, 0,
@@ -379,19 +475,25 @@ static void i440fx_mem_addr_setup(struct pci_device *dev, void *arg)
     pci_slot_get_irq = piix_pci_slot_get_irq;
 }
 
+static void mch_mmconfig_setup(u16 bdf)
+{
+    u64 addr = Q35_HOST_BRIDGE_PCIEXBAR_ADDR;
+    u32 upper = addr >> 32;
+    u32 lower = (addr & 0xffffffff) | Q35_HOST_BRIDGE_PCIEXBAREN;
+    pci_config_writel(bdf, Q35_HOST_BRIDGE_PCIEXBAR, 0);
+    pci_config_writel(bdf, Q35_HOST_BRIDGE_PCIEXBAR + 4, upper);
+    pci_config_writel(bdf, Q35_HOST_BRIDGE_PCIEXBAR, lower);
+}
+
 static void mch_mem_addr_setup(struct pci_device *dev, void *arg)
 {
     u64 addr = Q35_HOST_BRIDGE_PCIEXBAR_ADDR;
     u32 size = Q35_HOST_BRIDGE_PCIEXBAR_SIZE;
 
     /* setup mmconfig */
-    u16 bdf = dev->bdf;
-    u32 upper = addr >> 32;
-    u32 lower = (addr & 0xffffffff) | Q35_HOST_BRIDGE_PCIEXBAREN;
-    pci_config_writel(bdf, Q35_HOST_BRIDGE_PCIEXBAR, 0);
-    pci_config_writel(bdf, Q35_HOST_BRIDGE_PCIEXBAR + 4, upper);
-    pci_config_writel(bdf, Q35_HOST_BRIDGE_PCIEXBAR, lower);
-    add_e820(addr, size, E820_RESERVED);
+    MCHMmcfgBDF = dev->bdf;
+    mch_mmconfig_setup(dev->bdf);
+    e820_add(addr, size, E820_RESERVED);
 
     /* setup pci i/o window (above mmconfig) */
     pcimem_start = addr + size;
@@ -421,6 +523,30 @@ static void pci_bios_init_platform(void)
     }
 }
 
+static u8 pci_find_resource_reserve_capability(u16 bdf)
+{
+    if (pci_config_readw(bdf, PCI_VENDOR_ID) == PCI_VENDOR_ID_REDHAT &&
+        pci_config_readw(bdf, PCI_DEVICE_ID) ==
+                PCI_DEVICE_ID_REDHAT_ROOT_PORT) {
+        u8 cap = 0;
+        do {
+            cap = pci_find_capability(bdf, PCI_CAP_ID_VNDR, cap);
+        } while (cap &&
+                 pci_config_readb(bdf, cap + PCI_CAP_REDHAT_TYPE_OFFSET) !=
+                        REDHAT_CAP_RESOURCE_RESERVE);
+        if (cap) {
+            u8 cap_len = pci_config_readb(bdf, cap + PCI_CAP_FLAGS);
+            if (cap_len < RES_RESERVE_CAP_SIZE) {
+                dprintf(1, "PCI: QEMU resource reserve cap length %d is invalid\n",
+                        cap_len);
+            }
+        }
+        return cap;
+    } else {
+        dprintf(1, "PCI: QEMU resource reserve cap not found\n");
+        return 0;
+    }
+}
 
 /****************************************************************
  * Bus initialization
@@ -477,9 +603,31 @@ pci_bios_init_bus_rec(int bus, u8 *pci_bus)
         pci_bios_init_bus_rec(secbus, pci_bus);
 
         if (subbus != *pci_bus) {
+            u8 res_bus = *pci_bus;
+            u8 cap = pci_find_resource_reserve_capability(bdf);
+
+            if (cap) {
+                u32 tmp_res_bus = pci_config_readl(bdf,
+                        cap + RES_RESERVE_BUS_RES);
+                if (tmp_res_bus != (u32)-1) {
+                    res_bus = tmp_res_bus & 0xFF;
+                    if ((u8)(res_bus + secbus) < secbus ||
+                            (u8)(res_bus + secbus) < res_bus) {
+                        dprintf(1, "PCI: bus_reserve value %d is invalid\n",
+                                res_bus);
+                        res_bus = 0;
+                    }
+                    if (secbus + res_bus > *pci_bus) {
+                        dprintf(1, "PCI: QEMU resource reserve cap: bus = %u\n",
+                                res_bus);
+                        res_bus = secbus + res_bus;
+                    }
+                }
+            }
             dprintf(1, "PCI: subordinate bus = 0x%x -> 0x%x\n",
-                    subbus, *pci_bus);
-            subbus = *pci_bus;
+                    subbus, res_bus);
+            subbus = res_bus;
+            *pci_bus = res_bus;
         } else {
             dprintf(1, "PCI: subordinate bus = 0x%x\n", subbus);
         }
@@ -636,9 +784,8 @@ pci_region_create_entry(struct pci_bus *bus, struct pci_device *dev,
     return entry;
 }
 
-static int pci_bus_hotplug_support(struct pci_bus *bus)
+static int pci_bus_hotplug_support(struct pci_bus *bus, u8 pcie_cap)
 {
-    u8 pcie_cap = pci_find_capability(bus->bus_dev, PCI_CAP_ID_EXP);
     u8 shpc_cap;
 
     if (pcie_cap) {
@@ -662,8 +809,34 @@ static int pci_bus_hotplug_support(struct pci_bus *bus)
         return downstream_port && slot_implemented;
     }
 
-    shpc_cap = pci_find_capability(bus->bus_dev, PCI_CAP_ID_SHPC);
+    shpc_cap = pci_find_capability(bus->bus_dev->bdf, PCI_CAP_ID_SHPC, 0);
     return !!shpc_cap;
+}
+
+/* Test whether bridge support forwarding of transactions
+ * of a specific type.
+ * Note: disables bridge's window registers as a side effect.
+ */
+static int pci_bridge_has_region(struct pci_device *pci,
+                                 enum pci_region_type region_type)
+{
+    u8 base;
+
+    switch (region_type) {
+        case PCI_REGION_TYPE_IO:
+            base = PCI_IO_BASE;
+            break;
+        case PCI_REGION_TYPE_PREFMEM:
+            base = PCI_PREF_MEMORY_BASE;
+            break;
+        default:
+            /* Regular memory support is mandatory */
+            return 1;
+    }
+
+    pci_config_writeb(pci->bdf, base, 0xFF);
+
+    return pci_config_readb(pci->bdf, base) != 0;
 }
 
 static int pci_bios_check_devices(struct pci_bus *busses)
@@ -718,18 +891,67 @@ static int pci_bios_check_devices(struct pci_bus *busses)
              */
             parent = &busses[0];
         int type;
-        int hotplug_support = pci_bus_hotplug_support(s);
+        u16 bdf = s->bus_dev->bdf;
+        u8 pcie_cap = pci_find_capability(bdf, PCI_CAP_ID_EXP, 0);
+        u8 qemu_cap = pci_find_resource_reserve_capability(bdf);
+
+        int hotplug_support = pci_bus_hotplug_support(s, pcie_cap);
         for (type = 0; type < PCI_REGION_TYPE_COUNT; type++) {
             u64 align = (type == PCI_REGION_TYPE_IO) ?
                 PCI_BRIDGE_IO_MIN : PCI_BRIDGE_MEM_MIN;
             if (!pci_bridge_has_region(s->bus_dev, type))
                 continue;
+            u64 size = 0;
+            if (qemu_cap) {
+                u32 tmp_size;
+                u64 tmp_size_64;
+                switch(type) {
+                case PCI_REGION_TYPE_IO:
+                    tmp_size_64 = (pci_config_readl(bdf, qemu_cap + RES_RESERVE_IO) |
+                            (u64)pci_config_readl(bdf, qemu_cap + RES_RESERVE_IO + 4) << 32);
+                    if (tmp_size_64 != (u64)-1) {
+                        size = tmp_size_64;
+                    }
+                    break;
+                case PCI_REGION_TYPE_MEM:
+                    tmp_size = pci_config_readl(bdf, qemu_cap + RES_RESERVE_MEM);
+                    if (tmp_size != (u32)-1) {
+                        size = tmp_size;
+                    }
+                    break;
+                case PCI_REGION_TYPE_PREFMEM:
+                    tmp_size = pci_config_readl(bdf, qemu_cap + RES_RESERVE_PREF_MEM_32);
+                    tmp_size_64 = (pci_config_readl(bdf, qemu_cap + RES_RESERVE_PREF_MEM_64) |
+                            (u64)pci_config_readl(bdf, qemu_cap + RES_RESERVE_PREF_MEM_64 + 4) << 32);
+                    if (tmp_size != (u32)-1 && tmp_size_64 == (u64)-1) {
+                        size = tmp_size;
+                    } else if (tmp_size == (u32)-1 && tmp_size_64 != (u64)-1) {
+                        size = tmp_size_64;
+                    } else if (tmp_size != (u32)-1 && tmp_size_64 != (u64)-1) {
+                        dprintf(1, "PCI: resource reserve cap PREF32 and PREF64"
+                                " conflict\n");
+                    }
+                    break;
+                default:
+                    break;
+                }
+            }
             if (pci_region_align(&s->r[type]) > align)
                  align = pci_region_align(&s->r[type]);
             u64 sum = pci_region_sum(&s->r[type]);
-            if (!sum && hotplug_support)
+            int resource_optional = pcie_cap && (type == PCI_REGION_TYPE_IO);
+            if (!sum && hotplug_support && !resource_optional)
                 sum = align; /* reserve min size for hot-plug */
-            u64 size = ALIGN(sum, align);
+            if (size > sum) {
+                dprintf(1, "PCI: QEMU resource reserve cap: "
+                        "size %08llx type %s\n",
+                        size, region_type_name[type]);
+                if (type != PCI_REGION_TYPE_IO) {
+                    size = ALIGN(size, align);
+                }
+            } else {
+                size = ALIGN(sum, align);
+            }
             int is64 = pci_bios_bridge_region_is64(&s->r[type],
                                             s->bus_dev, type);
             // entry->bar is -1 if the entry represents a bridge region
@@ -811,17 +1033,17 @@ static int pci_bios_init_root_regions_mem(struct pci_bus *bus)
 static void
 pci_region_map_one_entry(struct pci_region_entry *entry, u64 addr)
 {
-    u16 bdf = entry->dev->bdf;
     if (entry->bar >= 0) {
-        dprintf(1, "PCI: map device bdf=%02x:%02x.%x"
+        dprintf(1, "PCI: map device bdf=%pP"
                 "  bar %d, addr %08llx, size %08llx [%s]\n",
-                pci_bdf_to_bus(bdf), pci_bdf_to_dev(bdf), pci_bdf_to_fn(bdf),
+                entry->dev,
                 entry->bar, addr, entry->size, region_type_name[entry->type]);
 
         pci_set_io_region_addr(entry->dev, entry->bar, addr, entry->is64);
         return;
     }
 
+    u16 bdf = entry->dev->bdf;
     u64 limit = addr + entry->size - 1;
     if (entry->type == PCI_REGION_TYPE_IO) {
         pci_config_writeb(bdf, PCI_IO_BASE, addr >> PCI_IO_SHIFT);

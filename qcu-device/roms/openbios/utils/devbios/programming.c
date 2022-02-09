@@ -7,7 +7,7 @@
  *  This program is part of a free implementation of the IEEE 1275-1994 
  *  Standard for Boot (Initialization Configuration) Firmware.
  *
- *  Copyright (C) 1998-2004  Stefan Reinauer, <stepan@openbios.org>
+ *  Copyright (C) 1998-2004  Stefan Reinauer
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -362,7 +362,7 @@ int flash_erase_sectors (unsigned char *addr, unsigned int flashnum, unsigned in
  * As long as there is a programming procedure going on, bit 6 of the last
  * written byte is toggling it's state with each consecutive read. 
  * The toggling stops as soon as the procedure is completed.
- * This function returns 0 if everything is ok, 1 if an error occured
+ * This function returns 0 if everything is ok, 1 if an error occurred
  * while programming was in progress.
  */ 
 
@@ -456,7 +456,7 @@ void iflash_program_byte (unsigned char *addr, unsigned int offset, unsigned cha
 
 	if (flag&0x18) {
 		flash_writeb (addr, offset, 0x50);	/* Reset Status Register */
-		printk (KERN_ERR "BIOS: Error occured, please repeat write operation. (intel)\n");
+		printk (KERN_ERR "BIOS: Error occurred, please repeat write operation. (intel)\n");
 	}
 
 	flash_writeb (addr, offset, 0xff);

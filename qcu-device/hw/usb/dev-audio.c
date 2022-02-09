@@ -29,6 +29,7 @@
  * THE SOFTWARE.
  */
 
+#include "qemu/osdep.h"
 #include "qemu-common.h"
 #include "hw/usb.h"
 #include "hw/usb/desc.h"
@@ -616,7 +617,7 @@ static void usb_audio_handle_data(USBDevice *dev, USBPacket *p)
     }
 }
 
-static void usb_audio_handle_destroy(USBDevice *dev)
+static void usb_audio_unrealize(USBDevice *dev, Error **errp)
 {
     USBAudioState *s = USB_AUDIO(dev);
 
@@ -664,7 +665,7 @@ static const VMStateDescription vmstate_usb_audio = {
 static Property usb_audio_properties[] = {
     DEFINE_PROP_UINT32("debug", USBAudioState, debug, 0),
     DEFINE_PROP_UINT32("buffer", USBAudioState, buffer,
-                       8 * USBAUDIO_PACKET_SIZE),
+                       32 * USBAUDIO_PACKET_SIZE),
     DEFINE_PROP_END_OF_LIST(),
 };
 
@@ -682,7 +683,7 @@ static void usb_audio_class_init(ObjectClass *klass, void *data)
     k->handle_reset   = usb_audio_handle_reset;
     k->handle_control = usb_audio_handle_control;
     k->handle_data    = usb_audio_handle_data;
-    k->handle_destroy = usb_audio_handle_destroy;
+    k->unrealize      = usb_audio_unrealize;
     k->set_interface  = usb_audio_set_interface;
 }
 

@@ -4,3 +4,8 @@ sftp-config.json
 *.[oa]
 qcu-device/tags
 cscope.*
+.idea/*
+*.log
+*.status
+*/build/*
+*/build/.gdbinit

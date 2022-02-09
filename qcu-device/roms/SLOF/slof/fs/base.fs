@@ -13,6 +13,22 @@
 \ Hash for faster lookup
 #include <find-hash.fs>
 
+\ WARNING: the wid>xxx and name>xxx definitions below are for the documentation
+\ purposes only; NAME>LINK LINK> NAME> should be used instead; no code outside
+\ of the engine has any business accessing flags, count, chars directly.
+
+\ STRUCT
+\  cell FIELD wid>next
+\  cell FIELD wid>names \ points to the first word in the list (name>next below)
+\ END-STRUCT
+
+\ STRUCT
+\  cell FIELD name>next
+\  /c   FIELD name>flags
+\  /c   FIELD name>count
+\  0    FIELD name>chars
+\ END-STRUCT
+
 : >name ( xt -- nfa ) \ note: still has the "immediate" field!
    BEGIN char- dup c@ UNTIL ( @lastchar )
    dup dup aligned - cell+ char- ( @lastchar lenmodcell )
@@ -25,10 +41,6 @@
 
 \ Words missing in *.in files
 VARIABLE mask -1 mask !
-
-VARIABLE huge-tftp-load 1 huge-tftp-load !
-\ Default implementation for sms-get-tftp-blocksize that return 1432 (decimal)
-: sms-get-tftp-blocksize 598 ;
 
 : default-hw-exception s" Exception #" type . ;
 
@@ -45,19 +57,6 @@ VARIABLE huge-tftp-load 1 huge-tftp-load !
 ;
 
 : 0.r  0 swap <# 0 ?DO # LOOP #> type ;
-
-\ count the number of bits equal 1
-\ the idea is to clear in each step the least significant bit
-\ v&(v-1) does exactly this, so count the steps until v == 0
-: cnt-bits  ( 64-bit-value -- #bits=1 )
-	dup IF
-		41 1 DO dup 1- and dup 0= IF drop i LEAVE THEN LOOP
-	THEN
-;
-
-: bcd-to-bin  ( bcd -- bin )
-   dup f and swap 4 rshift a * +
-;
 
 \ calcs the exponent of the highest power of 2 not greater than n
 : 2log ( n -- lb{n} )
@@ -76,14 +75,10 @@ CREATE $catpad 400 allot
    r> dup $catpad + r> swap r@ move
    r> + $catpad swap ;
 
-\ WARNING: The following two ($cat-comm & $cat-space) are dirty in a sense
-\ that they add 1 or 2 characters to str1 before executing $cat
+\ WARNING: The following $cat-space is dirty in a sense that it adds one
+\ character to str1 before executing $cat.
 \ The ASSUMPTION is that str1 buffer provides that extra space and it is
 \ responsibility of the code owner to ensure that
-: $cat-comma ( str2 len2 str1 len1 -- "str1, str2" len1+len2+2 )
-	2dup + s" , " rot swap move 2+ 2swap $cat
-;
-
 : $cat-space ( str2 len2 str1 len1 -- "str1 str2" len1+len2+1 )
 	2dup + bl swap c! 1+ 2swap $cat
 ;
@@ -111,6 +106,11 @@ CONSTANT <2constant>
 
 : str= ( str1 len1 str2 len2 -- equal? )
   rot over <> IF 3drop false ELSE comp 0= THEN ;
+
+: from-cstring ( addr - len )
+  dup dup BEGIN c@ 0 <> WHILE 1 + dup REPEAT
+  swap -
+;
 
 : test-string ( param len -- true | false )
    0 ?DO
@@ -158,10 +158,6 @@ CONSTANT <2constant>
 
 : isdigit ( char -- true | false )
    30 39 between
-;
-
-: ishexdigit ( char -- true | false )
-   30 39 between 41 46 between OR 61 66 between OR
 ;
 
 \ Variant of $number that defaults to decimal unless "0x" is
@@ -579,33 +575,8 @@ defer cursor-off ( -- )
 #include "debug.fs"
 \ provide 7.5.3.1 Dictionary search
 #include "dictionary.fs"
-\ block data access for IO devices - ought to be implemented in engine
-#include "rmove.fs"
 \ provide a simple run time preprocessor
 #include <preprocessor.fs>
 
 : $dnumber base @ >r decimal $number r> base ! ;
 : (.d) base @ >r decimal (.) r> base ! ;
-
-\ IP address conversion
-
-: (ipaddr) ( "a.b.c.d" -- FALSE | n1 n2 n3 n4 TRUE )
-   base @ >r decimal
-   over s" 000.000.000.000" comp 0= IF 2drop false r> base ! EXIT THEN
-   [char] . left-parse-string $number IF 2drop false r> base ! EXIT THEN -rot
-   [char] . left-parse-string $number IF 2drop false r> base ! EXIT THEN -rot
-   [char] . left-parse-string $number IF 2drop false r> base ! EXIT THEN -rot
-   $number IF false r> base ! EXIT THEN
-   true r> base !
-;
-
-: (ipformat)  ( n1 n2 n3 n4 -- str len )
-   base @ >r decimal
-   0 <# # # # [char] . hold drop # # # [char] . hold
-   drop # # # [char] . hold drop # # #s #>
-   r> base !
-;
-
-: ipformat  ( n1 n2 n3 n4 -- ) (ipformat) type ;
-
-

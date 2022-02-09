@@ -82,12 +82,51 @@ CREATE cdb 10 allot
     >r rot r> 			                ( block# #blocks addr len )
     2swap                                       ( addr len block# #blocks )
     dup >r
-    cdb scsi-build-read-10                      ( addr len )
+    cdb                                         ( addr len block# #blocks cdb )
+    max-block-num FFFFFFFF > IF
+        scsi-build-read-16                      ( addr len )
+    ELSE
+        scsi-build-read-10                      ( addr len )
+    THEN
     r> -rot                                     ( #blocks addr len )
     scsi-dir-read cdb scsi-param-size 10
     retry-scsi-command
                                                 ( #blocks [ sense-buf sense-len ] stat )
     dup 0<> IF " read-blocks" dump-scsi-error -65 throw ELSE drop THEN
+;
+
+: write-blocks ( addr block# #blocks -- #written )
+    scsi-disk-debug? IF
+        ." SCSI-DISK: write-blocks " .s cr
+    THEN
+
+    \ Do not allow writes to the partition table (GPT is in first 34 sectors)
+    over 22 < IF
+        ." SCSI-DISK ERROR: Write access to partition table is not allowed." cr
+        3drop 0 EXIT
+    THEN
+
+    \ Bound check
+    2dup + max-block-num > IF
+        ." SCSI-DISK: Access beyond end of device ! " cr
+        3drop 0 EXIT
+    THEN
+
+    dup block-size *                            ( addr block# #blocks len )
+    >r rot r>                                   ( block# #blocks addr len )
+    2swap                                       ( addr len block# #blocks )
+    dup >r
+    cdb                                         ( addr len block# #blocks cdb )
+    max-block-num FFFFFFFF > IF
+        scsi-build-write-16
+    ELSE
+        scsi-build-write-10
+    THEN
+    r> -rot                                     ( #blocks addr len )
+    scsi-dir-write cdb scsi-param-size 10
+    retry-scsi-command
+                                                ( #blocks [ sense-buf sense-len ] stat )
+    dup 0<> IF s" write-blocks" dump-scsi-error -65 throw ELSE drop THEN
 ;
 
 : (inquiry) ( size -- buffer | NULL )
@@ -119,6 +158,20 @@ CREATE cdb 10 allot
     \ Success ?
     dup 0<> IF " read-capacity" dump-scsi-error 0 0 EXIT THEN
     drop scratch scsi-get-capacity-10 1 +
+;
+
+: read-capacity-16 ( -- blocksize #blocks )
+    \ Now issue the read-capacity-16 command
+    scsi-disk-debug? IF
+        ." SCSI-DISK: read-capacity-16 " .s cr
+    THEN
+    \ Make sure that there are zeros in the buffer in case something goes wrong:
+    scratch scsi-length-read-cap-16-data erase
+    cdb scsi-build-read-cap-16 scratch scsi-length-read-cap-16-data scsi-dir-read
+    cdb scsi-param-size 1 retry-scsi-command
+    \ Success ?
+    dup 0<> IF " read-capacity-16" dump-scsi-error 0 0 EXIT THEN
+    drop scratch scsi-get-capacity-16 1 +
 ;
 
 100 CONSTANT test-unit-retries
@@ -270,8 +323,12 @@ CREATE cdb 10 allot
 
     \ Skip devices with PQ != 0
     dup inquiry-data>peripheral c@ e0 and 0 <> IF
-        ." SCSI-DISK: Unsupported PQ != 0" cr
-	false EXIT
+        \ Ignore 7f, since this simply means that the target
+        \ is not supporting a peripheral device at this LUN.
+        inquiry-data>peripheral c@ 7f <> IF
+            ." SCSI-DISK: Unsupported PQ != 0" cr
+        THEN
+        false EXIT
     THEN
 
     inquiry-data>peripheral c@ CASE
@@ -293,6 +350,11 @@ CREATE cdb 10 allot
     " max-transfer" $call-parent to max-transfer
 
     read-capacity to max-block-num to block-size
+    \ Check if read-capacity-10 hit the maximum value 0xFFFF.FFFF
+    max-block-num 100000000 = IF
+        read-capacity-16 to max-block-num to block-size
+    THEN
+
     max-block-num 0= block-size 0= OR IF
        ." SCSI-DISK: Failed to get disk capacity!" cr
        FALSE EXIT
@@ -317,6 +379,10 @@ CREATE cdb 10 allot
 
 : read ( addr len -- actual )
     s" read" deblocker @ $call-method ;
+
+: write ( addr len -- actual )
+    s" write" deblocker @ $call-method
+;
 
 \ Get rid of SCSI bits
 scsi-close
